@@ -1,4 +1,0 @@
-# Hashes of file build rules.
-58a85855cef59a05adf256173e607a54 WolfsDen_artefacts/JuceLibraryCode/WolfsDen_AU/PkgInfo
-eade9c45aa60c70b013c79ba26bb5cbf WolfsDen_artefacts/JuceLibraryCode/WolfsDen_Standalone/PkgInfo
-f4e60fbefdf3651466f84e2a2ef15dd8 WolfsDen_artefacts/JuceLibraryCode/WolfsDen_VST3/PkgInfo

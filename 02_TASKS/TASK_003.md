@@ -1,6 +1,6 @@
 TASK ID: 003
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Build the core AudioProcessor (DSP backbone) and parameter system for Wolf's Den. This task establishes the AudioProcessor class, all parameter definitions with fixed IDs, the state save/recall system (getStateInformation/setStateInformation), and the thread-safe bridge between the UI thread and DSP thread. No actual audio generation yet — this is the skeleton that all engines plug into.

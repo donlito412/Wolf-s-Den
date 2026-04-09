@@ -1,6 +1,6 @@
 TASK ID: 007
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Build the Modulation System — the Mod Matrix, XY Performance Pad (Wolf's Den equivalent of Omnisphere's Orb), and the Flex-Assign system. This connects modulation sources (LFOs, Envelopes, MIDI, XY Pad) to any modulatable parameter in the synth. This system gives Wolf's Den its motion and expressiveness.

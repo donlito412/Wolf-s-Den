@@ -1,6 +1,6 @@
 TASK ID: 008
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Build the FX Engine — a hierarchical, multi-rack effects system with per-layer FX, a master FX chain, and full Mod Matrix integration for all FX parameters. This gives Wolf's Den professional-quality audio shaping inside the plugin.

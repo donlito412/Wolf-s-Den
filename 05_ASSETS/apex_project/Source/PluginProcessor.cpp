@@ -1,6 +1,25 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace
+{
+static constexpr std::array<const char*, 5> kAutomationTestParamIds {
+    "master_volume",
+    "master_pan",
+    "layer0_volume",
+    "lfo_rate",
+    "fx_reverb_mix",
+};
+
+bool isAutomationTestParam(const juce::String& id)
+{
+    for (auto* s : kAutomationTestParamIds)
+        if (id == s)
+            return true;
+    return false;
+}
+} // namespace
+
 WolfsDenAudioProcessor::WolfsDenAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
     : AudioProcessor(
@@ -13,17 +32,125 @@ WolfsDenAudioProcessor::WolfsDenAudioProcessor()
 #endif
       ),
 #endif
-      apvts(*this, nullptr, "Parameters", {})
+      apvts(*this, nullptr, "Parameters", wolfsden::makeParameterLayout())
 {
+    registerApvtsListeners();
+
+    const auto dbDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                           .getChildFile("Wolf Productions")
+                           .getChildFile("Wolf's Den");
+    (void)dbDir.createDirectory();
+    theoryEngine.initialise(dbDir.getChildFile("theory.db"));
+    syncTheoryParamsFromApvts();
 }
 
-void WolfsDenAudioProcessor::prepareToPlay(double, int)
+WolfsDenAudioProcessor::~WolfsDenAudioProcessor()
 {
-    juce::ignoreUnused(midiPipeline, theoryEngine, synthEngine, fxEngine);
+    unregisterApvtsListeners();
+}
+
+void WolfsDenAudioProcessor::registerApvtsListeners()
+{
+    for (auto* param : getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*>(param))
+            apvts.addParameterListener(withId->getParameterID(), this);
+}
+
+void WolfsDenAudioProcessor::unregisterApvtsListeners()
+{
+    for (auto* param : getParameters())
+        if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*>(param))
+            apvts.removeParameterListener(withId->getParameterID(), this);
+}
+
+void WolfsDenAudioProcessor::parameterChanged(const juce::String& parameterID, float newValue)
+{
+    juce::ignoreUnused(newValue);
+
+    if (theoryEngine.isDatabaseReady())
+    {
+        if (parameterID == "theory_scale_root")
+        {
+            if (auto* p = dynamic_cast<juce::AudioParameterInt*>(apvts.getParameter("theory_scale_root")))
+                theoryEngine.setScaleRoot(p->get());
+        }
+        else if (parameterID == "theory_scale_type")
+        {
+            if (auto* c = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("theory_scale_type")))
+                theoryEngine.setScaleType(c->getIndex());
+        }
+        else if (parameterID == "theory_voice_leading")
+        {
+            if (auto* b = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("theory_voice_leading")))
+                theoryEngine.setVoiceLeadingEnabled(b->get());
+        }
+    }
+
+    if (!isAutomationTestParam(parameterID))
+        return;
+
+    UiToDspMessage m;
+    m.paramIdHash = (uint32_t)parameterID.hashCode();
+    m.value = newValue;
+    int s1 = 0, z1 = 0, s2 = 0, z2 = 0;
+    uiToDspFifo.prepareToWrite(1, s1, z1, s2, z2);
+    if (z1 > 0)
+        uiToDspBuffer[(size_t)s1] = m;
+    else if (z2 > 0)
+        uiToDspBuffer[(size_t)s2] = m;
+    else
+        return;
+    uiToDspFifo.finishedWrite(1);
+}
+
+void WolfsDenAudioProcessor::drainUiToDspFifo() noexcept
+{
+    for (;;)
+    {
+        int s1 = 0, z1 = 0, s2 = 0, z2 = 0;
+        uiToDspFifo.prepareToRead(256, s1, z1, s2, z2);
+        const int n = z1 + z2;
+        if (n <= 0)
+            break;
+
+        for (int i = 0; i < z1; ++i)
+            juce::ignoreUnused(uiToDspBuffer[(size_t)(s1 + i)]);
+        for (int i = 0; i < z2; ++i)
+            juce::ignoreUnused(uiToDspBuffer[(size_t)(s2 + i)]);
+
+        uiToDspFifo.finishedRead(n);
+    }
+}
+
+void WolfsDenAudioProcessor::syncTheoryParamsFromApvts()
+{
+    if (!theoryEngine.isDatabaseReady())
+        return;
+
+    if (auto* p = dynamic_cast<juce::AudioParameterInt*>(apvts.getParameter("theory_scale_root")))
+        theoryEngine.setScaleRoot(p->get());
+    if (auto* c = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("theory_scale_type")))
+        theoryEngine.setScaleType(c->getIndex());
+    if (auto* b = dynamic_cast<juce::AudioParameterBool*>(apvts.getParameter("theory_voice_leading")))
+        theoryEngine.setVoiceLeadingEnabled(b->get());
+}
+
+void WolfsDenAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+{
+    theoryEngine.prepare(sampleRate, samplesPerBlock);
+    syncTheoryParamsFromApvts();
+    midiPipeline.prepare(sampleRate, samplesPerBlock, apvts);
+    synthEngine.prepare(sampleRate, samplesPerBlock, apvts);
+    synthLayerBus.setSize(8, samplesPerBlock);
+    fxEngine.prepare(sampleRate, samplesPerBlock, apvts);
 }
 
 void WolfsDenAudioProcessor::releaseResources()
 {
+    theoryEngine.reset();
+    midiPipeline.reset();
+    synthEngine.reset();
+    fxEngine.reset();
 }
 
 bool WolfsDenAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
@@ -43,25 +170,96 @@ bool WolfsDenAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) 
 void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
-    juce::ignoreUnused(midi);
+
+    drainUiToDspFifo();
 
     for (int i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
         buffer.clear(i, 0, buffer.getNumSamples());
 
-    buffer.clear();
+    theoryEngine.processMidi(midi);
+    midiPipeline.process(midi, buffer.getNumSamples(), getSampleRate(), getPlayHead(), theoryEngine);
+
+    const int n = buffer.getNumSamples();
+    if (synthLayerBus.getNumChannels() < 8 || synthLayerBus.getNumSamples() < n)
+        synthLayerBus.setSize(8, n);
+
+    synthEngine.process(synthLayerBus, midi, apvts);
+    fxEngine.processBlock(synthLayerBus,
+                          buffer,
+                          apvts,
+                          synthEngine.getLastFxReverbMixAdd(),
+                          synthEngine.getLastFxDelayMixAdd(),
+                          synthEngine.getLastFxChorusMixAdd());
+}
+
+void WolfsDenAudioProcessor::setPresetDisplayName(juce::String name)
+{
+    const juce::ScopedLock sl(customStateLock);
+    presetDisplayName = std::move(name);
+}
+
+juce::String WolfsDenAudioProcessor::getPresetDisplayName() const
+{
+    const juce::ScopedLock sl(customStateLock);
+    return presetDisplayName;
+}
+
+void WolfsDenAudioProcessor::setLastEditorBounds(int width, int height)
+{
+    editorWidth.store(width, std::memory_order_relaxed);
+    editorHeight.store(height, std::memory_order_relaxed);
 }
 
 void WolfsDenAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    if (auto state = apvts.copyState().createXml())
-        copyXmlToBinary(*state, destData);
+    juce::ValueTree root("WolfsDenState");
+    root.appendChild(apvts.copyState(), nullptr);
+
+    juce::ValueTree custom("CustomState");
+    {
+        const juce::ScopedLock sl(customStateLock);
+        custom.setProperty("presetName", presetDisplayName, nullptr);
+        custom.setProperty("chordData", chordProgressionBlob, nullptr);
+    }
+    custom.setProperty("editorWidth", editorWidth.load(std::memory_order_relaxed), nullptr);
+    custom.setProperty("editorHeight", editorHeight.load(std::memory_order_relaxed), nullptr);
+    root.appendChild(custom, nullptr);
+
+    if (auto xml = root.createXml())
+        copyXmlToBinary(*xml, destData);
 }
 
 void WolfsDenAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
-        if (xml->hasTagName(apvts.state.getType()))
-            apvts.replaceState(juce::ValueTree::fromXml(*xml));
+    {
+        auto root = juce::ValueTree::fromXml(*xml);
+        if (!root.isValid())
+            return;
+
+        if (root.hasType("WolfsDenState"))
+        {
+            if (auto params = root.getChildWithName(apvts.state.getType()); params.isValid())
+            {
+                apvts.replaceState(params);
+                syncTheoryParamsFromApvts();
+            }
+
+            if (auto custom = root.getChildWithName("CustomState"); custom.isValid())
+            {
+                const juce::ScopedLock sl(customStateLock);
+                presetDisplayName = custom.getProperty("presetName").toString();
+                chordProgressionBlob = custom.getProperty("chordData").toString();
+                editorWidth.store((int)custom.getProperty("editorWidth", 480), std::memory_order_relaxed);
+                editorHeight.store((int)custom.getProperty("editorHeight", 320), std::memory_order_relaxed);
+            }
+        }
+        else if (root.hasType(apvts.state.getType()))
+        {
+            apvts.replaceState(root);
+            syncTheoryParamsFromApvts();
+        }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

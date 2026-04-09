@@ -1,6 +1,6 @@
 TASK ID: 004
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Build the Synthesis Engine — the audio-generating core of Wolf's Den. This includes 4 independent layers per patch, each with a full oscillator, dual filters, amp & filter envelopes, and 2 LFOs. A completed task means Wolf's Den produces real, audible audio from MIDI input across all oscillator types.

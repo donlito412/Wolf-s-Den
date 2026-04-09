@@ -1,6 +1,6 @@
 TASK ID: 005
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Build the Music Theory Engine — the harmonic intelligence core of Wolf's Den. This includes the embedded SQLite database (chord definitions, scale definitions, chord sets), real-time MIDI chord detection, audio chord detection via FFT, voice leading algorithm, and the scale/mode system. This engine is what sets Wolf's Den apart from ordinary synths.

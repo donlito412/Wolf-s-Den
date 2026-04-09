@@ -16,6 +16,7 @@ public:
     void resized() override;
 
 private:
+    WolfsDenAudioProcessor& audioProcessor;
     wolfsden::MainComponent mainComponent;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WolfsDenAudioProcessorEditor)

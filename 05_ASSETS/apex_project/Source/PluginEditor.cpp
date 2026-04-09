@@ -3,12 +3,13 @@
 
 WolfsDenAudioProcessorEditor::WolfsDenAudioProcessorEditor(WolfsDenAudioProcessor& p)
     : AudioProcessorEditor(&p)
+    , audioProcessor(p)
     , mainComponent(p)
 {
     addAndMakeVisible(mainComponent);
-    setSize(480, 320);
+    setSize(720, 520);
     setResizable(true, true);
-    setResizeLimits(320, 240, 2000, 1200);
+    setResizeLimits(480, 400, 2000, 1200);
 }
 
 void WolfsDenAudioProcessorEditor::paint(juce::Graphics& g)
@@ -19,4 +20,5 @@ void WolfsDenAudioProcessorEditor::paint(juce::Graphics& g)
 void WolfsDenAudioProcessorEditor::resized()
 {
     mainComponent.setBounds(getLocalBounds());
+    audioProcessor.setLastEditorBounds(getWidth(), getHeight());
 }

@@ -31,10 +31,15 @@ Wolf's Den is a multi-layer hybrid synthesizer with an embedded music theory eng
 - Stable: zero crashes in 4-hour session tests
 
 # CURRENT STATUS
-PLANNING — Architecture phase
+Active development — core plugin building in JUCE (synth, MIDI pipeline, modulation, FX rack). All shipped features are held to **release quality**: no “placeholder” behavior marketed as finished product; names match what the DSP actually does.
 
 # NEXT MILESTONE
-Complete TASK_001: Architecture Design Document
+Continue TASK_009+ UI and integration; parallel **quality hardening** of synthesis, FX, and modulation to reference-plugin depth (see engineering backlog / reports).
+
+# QUALITY BAR (NON-NEGOTIABLE)
+- If it’s in the build under a given name, it must **work properly** at a level fit for professional use.
+- **Honest naming:** algorithm variants are labeled accurately (e.g. plate/spring-style vs physical modeling).
+- **No silent shortcuts** for brand-facing releases: improve the DSP or narrow the claim — never the reverse.
 
 # TECH STACK
 - Framework: JUCE 7+ (C++)

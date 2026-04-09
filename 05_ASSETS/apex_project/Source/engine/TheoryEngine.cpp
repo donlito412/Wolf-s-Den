@@ -1,5 +1,1038 @@
 #include "TheoryEngine.h"
 
+// SQLite3 single-file amalgamation (bundled in ThirdParty/sqlite3/)
+#include "../../ThirdParty/sqlite3/sqlite3.h"
+
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <sstream>
+
 namespace wolfsden
 {
+
+// =============================================================================
+// Helpers — JSON interval array serialisation
+// =============================================================================
+
+namespace
+{
+
+/** Parse "[0,4,7,11]" → {0,4,7,11} */
+std::vector<int> parseIntervalJsonImpl (const std::string& json)
+{
+    std::vector<int> result;
+    std::istringstream ss (json);
+    char ch;
+    int val;
+    while (ss >> ch)
+    {
+        if (ch == '[' || ch == ']' || ch == ',') continue;
+        ss.putback (ch);
+        if (ss >> val)
+            result.push_back (val);
+    }
+    return result;
+}
+
+/** {0,4,7,11} → "[0,4,7,11]" */
+std::string buildIntervalJsonImpl (const std::vector<int>& iv)
+{
+    std::string s = "[";
+    for (int i = 0; i < (int) iv.size(); ++i)
+    {
+        if (i) s += ",";
+        s += std::to_string (iv[i]);
+    }
+    s += "]";
+    return s;
+}
+
+// Frequency of MIDI note 0 (C-1) in Hz
+constexpr double kMidi0Hz = 8.1757989156;
+
+/** Portable 32-bit popcount (C++17). */
+inline int popcount32 (unsigned x) noexcept
+{
+    int n = 0;
+    while (x != 0)
+    {
+        x &= x - 1u;
+        ++n;
+    }
+    return n;
+}
+
+/** Convert FFT bin index to nearest MIDI pitch class (0-11). */
+int binToPitchClass (int bin, int fftSize, double sampleRate) noexcept
+{
+    if (bin <= 0) return 0;
+    const double hz = static_cast<double> (bin) * sampleRate / static_cast<double> (fftSize);
+    if (hz < 20.0 || hz > 20000.0) return -1;
+    const double midi = 69.0 + 12.0 * std::log2 (hz / 440.0);
+    if (midi < 0.0 || midi > 127.0) return -1;
+    return static_cast<int> (std::round (midi)) % 12;
+}
+
+} // anonymous namespace
+
+// =============================================================================
+// Constructor / Destructor
+// =============================================================================
+
+TheoryEngine::TheoryEngine()
+    : fft (kFftOrder)
+{
+    for (auto& a : activeNotes)
+        a.store (false, std::memory_order_relaxed);
+
+    // Initialise scale lookup tables to chromatic (identity mapping)
+    for (auto& tbl : scaleTables)
+        for (int i = 0; i < 128; ++i)
+            tbl[static_cast<size_t> (i)] = i;
+}
+
+TheoryEngine::~TheoryEngine()
+{
+    reset();
+    closeDatabase();
+}
+
+// =============================================================================
+// Lifecycle
+// =============================================================================
+
+void TheoryEngine::initialise (const juce::File& dbFile)
+{
+    // Close any previous connection
+    closeDatabase();
+
+    if (!openDatabase (dbFile))
+    {
+        jassertfalse;
+        return;
+    }
+
+    createSchema();
+    seedDatabase();
+    loadChordDefinitions();
+    loadScaleDefinitions();
+    rebuildScaleLookupTable();
+
+    databaseReady.store (true, std::memory_order_release);
+
+    // Start background detection thread
+    threadShouldStop.store (false, std::memory_order_release);
+    detectionThread = std::make_unique<std::thread> ([this] { detectionThreadFunc(); });
+}
+
+void TheoryEngine::prepare (double sampleRate, int samplesPerBlock) noexcept
+{
+    currentSampleRate = sampleRate;
+    currentBlockSize  = samplesPerBlock;
+
+    if (!databaseReady.load (std::memory_order_acquire))
+        return;
+
+    threadShouldStop.store (false, std::memory_order_release);
+    if (!detectionThread)
+        detectionThread = std::make_unique<std::thread> ([this] { detectionThreadFunc(); });
+}
+
+void TheoryEngine::reset() noexcept
+{
+    // Signal the background thread to stop and join it
+    threadShouldStop.store (true, std::memory_order_release);
+    if (detectionThread && detectionThread->joinable())
+        detectionThread->join();
+    detectionThread.reset();
+
+    // Clear all active notes
+    for (auto& a : activeNotes)
+        a.store (false, std::memory_order_relaxed);
+
+    // Reset audio FIFO
+    audioFifo.reset();
+}
+
+// =============================================================================
+// DSP thread — processMidi
+// =============================================================================
+
+void TheoryEngine::processMidi (const juce::MidiBuffer& midi) noexcept
+{
+    for (const auto meta : midi)
+    {
+        const auto msg = meta.getMessage();
+        if (msg.isNoteOn())
+            activeNotes[static_cast<size_t> (msg.getNoteNumber())].store (true, std::memory_order_relaxed);
+        else if (msg.isNoteOff())
+            activeNotes[static_cast<size_t> (msg.getNoteNumber())].store (false, std::memory_order_relaxed);
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
+            for (auto& a : activeNotes)
+                a.store (false, std::memory_order_relaxed);
+    }
+}
+
+// =============================================================================
+// DSP thread — processAudio (sidechain)
+// =============================================================================
+
+void TheoryEngine::processAudio (const float* monoData, int numSamples) noexcept
+{
+    if (detectionModeAtom.load (std::memory_order_relaxed) != 1) return;
+    if (!monoData || numSamples <= 0) return;
+
+    int written = 0;
+    while (written < numSamples)
+    {
+        int start1, size1, start2, size2;
+        const int toWrite = numSamples - written;
+        audioFifo.prepareToWrite (toWrite, start1, size1, start2, size2);
+        if (size1 > 0) std::memcpy (&audioFifoData[static_cast<size_t> (start1)],
+                                    monoData + written, static_cast<size_t> (size1) * sizeof (float));
+        if (size2 > 0) std::memcpy (&audioFifoData[static_cast<size_t> (start2)],
+                                    monoData + written + size1, static_cast<size_t> (size2) * sizeof (float));
+        audioFifo.finishedWrite (size1 + size2);
+        written += (size1 + size2);
+        if (size1 + size2 == 0) break; // FIFO full — drop remaining
+    }
+}
+
+// =============================================================================
+// Parameter setters
+// =============================================================================
+
+void TheoryEngine::setScaleRoot (int root) noexcept
+{
+    scaleRoot.store (juce::jlimit (0, 11, root), std::memory_order_relaxed);
+    rebuildScaleLookupTable();
+}
+
+void TheoryEngine::setScaleType (int index) noexcept
+{
+    scaleType.store (index, std::memory_order_relaxed);
+    rebuildScaleLookupTable();
+}
+
+void TheoryEngine::setVoiceLeadingEnabled (bool on) noexcept
+{
+    voiceLeadingOn.store (on, std::memory_order_relaxed);
+}
+
+void TheoryEngine::setDetectionMode (DetectionMode mode) noexcept
+{
+    detectionModeAtom.store (mode == DetectionMode::Midi ? 0 : 1, std::memory_order_relaxed);
+}
+
+// =============================================================================
+// Detection results
+// =============================================================================
+
+ChordMatch TheoryEngine::getBestMatch() const noexcept
+{
+    return { atomicMatches[0].chordId.load  (std::memory_order_relaxed),
+             atomicMatches[0].rootNote.load (std::memory_order_relaxed),
+             static_cast<float> (atomicMatches[0].scoreX1k.load (std::memory_order_relaxed)) / 1000.f };
+}
+
+std::array<ChordMatch, 3> TheoryEngine::getTopMatches() const noexcept
+{
+    std::array<ChordMatch, 3> out;
+    for (int i = 0; i < 3; ++i)
+        out[static_cast<size_t> (i)] = { atomicMatches[static_cast<size_t> (i)].chordId.load (std::memory_order_relaxed),
+                                         atomicMatches[static_cast<size_t> (i)].rootNote.load (std::memory_order_relaxed),
+                                         static_cast<float> (atomicMatches[static_cast<size_t> (i)].scoreX1k.load (std::memory_order_relaxed)) / 1000.f };
+    return out;
+}
+
+// =============================================================================
+// Scale lookup table
+// =============================================================================
+
+void TheoryEngine::getScaleLookupTable (std::array<int, 128>& tableOut) const noexcept
+{
+    const int idx = activeTableIdx.load (std::memory_order_acquire);
+    tableOut = scaleTables[static_cast<size_t> (idx)];
+}
+
+void TheoryEngine::rebuildScaleLookupTable() noexcept
+{
+    const int root  = scaleRoot.load (std::memory_order_relaxed);
+    const int sType = scaleType.load (std::memory_order_relaxed);
+
+    // Determine which scale intervals to use
+    const std::vector<int>* intervals = nullptr;
+    if (!scaleDefs.empty())
+    {
+        const int clamped = juce::jlimit (0, static_cast<int> (scaleDefs.size()) - 1, sType);
+        intervals = &scaleDefs[static_cast<size_t> (clamped)].intervals;
+    }
+
+    // Write into the inactive buffer
+    const int writeIdx = 1 - activeTableIdx.load (std::memory_order_relaxed);
+    auto& tbl = scaleTables[static_cast<size_t> (writeIdx)];
+
+    if (!intervals || intervals->empty())
+    {
+        // Chromatic fallback — identity
+        for (int i = 0; i < 128; ++i) tbl[static_cast<size_t> (i)] = i;
+    }
+    else
+    {
+        for (int i = 0; i < 128; ++i)
+            tbl[static_cast<size_t> (i)] = nearestInScaleNote (i, *intervals, root);
+    }
+
+    // Flip to make it the active buffer
+    activeTableIdx.store (writeIdx, std::memory_order_release);
+}
+
+// static
+int TheoryEngine::nearestInScaleNote (int midiNote,
+                                      const std::vector<int>& scaleIntervals,
+                                      int root) noexcept
+{
+    // Walk up from midiNote until we find a note whose pitch class is in the scale
+    for (int offset = 0; offset < 12; ++offset)
+    {
+        const int candidate = midiNote + offset;
+        if (candidate > 127) break;
+        const int pc = ((candidate - root) % 12 + 12) % 12;
+        for (int interval : scaleIntervals)
+            if ((interval % 12) == pc)
+                return candidate;
+    }
+    return midiNote; // Chromatic fallback
+}
+
+// =============================================================================
+// Background detection thread
+// =============================================================================
+
+void TheoryEngine::detectionThreadFunc()
+{
+    using namespace std::chrono_literals;
+
+    while (!threadShouldStop.load (std::memory_order_acquire))
+    {
+        if (detectionModeAtom.load (std::memory_order_relaxed) == 1)
+            runFftDetection();
+        else
+            runMidiDetection();
+
+        // ~50 ms between passes
+        std::this_thread::sleep_for (50ms);
+    }
+}
+
+void TheoryEngine::runMidiDetection()
+{
+    if (chordDefs.empty()) return;
+
+    const PitchClassSet pitchClasses = snapshotActivePitchClasses();
+
+    // Only proceed if at least 2 pitch classes are active
+    int activeCount = 0;
+    for (bool b : pitchClasses) if (b) ++activeCount;
+    if (activeCount < 2) return;
+
+    const auto matches = detectChords (pitchClasses);
+    storeMatches (matches);
+}
+
+void TheoryEngine::runFftDetection()
+{
+    if (chordDefs.empty()) return;
+
+    // Need a full FFT frame of audio
+    if (audioFifo.getNumReady() < kFftSize) return;
+
+    // Read kFftSize samples
+    {
+        int start1, size1, start2, size2;
+        audioFifo.prepareToRead (kFftSize, start1, size1, start2, size2);
+
+        // Copy into work buffer (real part; imaginary = 0)
+        for (int i = 0; i < size1; ++i)
+        {
+            fftWorkBuf[static_cast<size_t> (i * 2)]     = audioFifoData[static_cast<size_t> (start1 + i)];
+            fftWorkBuf[static_cast<size_t> (i * 2 + 1)] = 0.f;
+        }
+        for (int i = 0; i < size2; ++i)
+        {
+            fftWorkBuf[static_cast<size_t> ((size1 + i) * 2)]     = audioFifoData[static_cast<size_t> (start2 + i)];
+            fftWorkBuf[static_cast<size_t> ((size1 + i) * 2 + 1)] = 0.f;
+        }
+
+        // Zero-pad remainder (if any)
+        const int total = size1 + size2;
+        for (int i = total; i < kFftSize; ++i)
+        {
+            fftWorkBuf[static_cast<size_t> (i * 2)]     = 0.f;
+            fftWorkBuf[static_cast<size_t> (i * 2 + 1)] = 0.f;
+        }
+
+        audioFifo.finishedRead (size1 + size2);
+    }
+
+    // Apply Hanning window to the real part
+    for (int i = 0; i < kFftSize; ++i)
+    {
+        const float w = 0.5f - 0.5f * std::cos (2.f * juce::MathConstants<float>::pi
+                                                     * static_cast<float> (i)
+                                                     / static_cast<float> (kFftSize - 1));
+        fftWorkBuf[static_cast<size_t> (i * 2)] *= w;
+    }
+
+    // Perform FFT (complex in-place, interleaved)
+    fft.performRealOnlyForwardTransform (fftWorkBuf.data(), true);
+
+    // Compute magnitudes for positive frequencies
+    for (int i = 0; i < kFftSize / 2; ++i)
+    {
+        const float re = fftWorkBuf[static_cast<size_t> (i * 2)];
+        const float im = fftWorkBuf[static_cast<size_t> (i * 2 + 1)];
+        fftMagnitudes[static_cast<size_t> (i)] = std::sqrt (re * re + im * im);
+    }
+
+    // Pick the top 6 magnitude peaks → map to pitch classes
+    PitchClassSet pitchClasses {};
+    pitchClasses.fill (false);
+
+    // Simple local-max peak detection (skip DC bin 0)
+    std::array<std::pair<float, int>, 6> peaks {};
+    peaks.fill ({ 0.f, -1 });
+
+    for (int i = 1; i < kFftSize / 2 - 1; ++i)
+    {
+        const float mag = fftMagnitudes[static_cast<size_t> (i)];
+        if (mag > fftMagnitudes[static_cast<size_t> (i - 1)] &&
+            mag > fftMagnitudes[static_cast<size_t> (i + 1)])
+        {
+            // Replace weakest peak if this is stronger
+            auto weakest = std::min_element (peaks.begin(), peaks.end(),
+                [] (const auto& a, const auto& b) { return a.first < b.first; });
+            if (mag > weakest->first)
+                *weakest = { mag, i };
+        }
+    }
+
+    for (const auto& [mag, bin] : peaks)
+    {
+        if (bin < 0) continue;
+        const int pc = binToPitchClass (bin, kFftSize, currentSampleRate);
+        if (pc >= 0)
+            pitchClasses[static_cast<size_t> (pc)] = true;
+    }
+
+    int activeCount = 0;
+    for (bool b : pitchClasses) if (b) ++activeCount;
+    if (activeCount < 2) return;
+
+    const auto matches = detectChords (pitchClasses);
+    storeMatches (matches);
+}
+
+// =============================================================================
+// Chord detection core
+// =============================================================================
+
+PitchClassSet TheoryEngine::snapshotActivePitchClasses() const noexcept
+{
+    PitchClassSet pcs {};
+    pcs.fill (false);
+    for (int note = 0; note < 128; ++note)
+        if (activeNotes[static_cast<size_t> (note)].load (std::memory_order_relaxed))
+            pcs[static_cast<size_t> (note % 12)] = true;
+    return pcs;
+}
+
+float TheoryEngine::jaccardScore (const PitchClassSet& pitchClasses,
+                                  const std::vector<int>& intervals,
+                                  int root) const noexcept
+{
+    // Build the chord pitch-class set for this root
+    int chordBits = 0;
+    for (int iv : intervals)
+        chordBits |= (1 << ((root + iv) % 12));
+
+    // Build active-note bitmask
+    int activeBits = 0;
+    for (int pc = 0; pc < 12; ++pc)
+        if (pitchClasses[static_cast<size_t> (pc)])
+            activeBits |= (1 << pc);
+
+    const int intersection = popcount32 (static_cast<unsigned> (activeBits & chordBits));
+    const int unionBits    = popcount32 (static_cast<unsigned> (activeBits | chordBits));
+
+    if (unionBits == 0) return 0.f;
+    return static_cast<float> (intersection) / static_cast<float> (unionBits);
+}
+
+std::array<ChordMatch, 3> TheoryEngine::detectChords (const PitchClassSet& pitchClasses) const
+{
+    // Initialise with sentinel
+    std::array<ChordMatch, 3> top;
+    top[0] = top[1] = top[2] = { -1, 0, 0.f };
+
+    for (size_t idx = 0; idx < chordDefs.size(); ++idx)
+    {
+        const auto& cd = chordDefs[idx];
+        for (int root = 0; root < 12; ++root)
+        {
+            const float score = jaccardScore (pitchClasses, cd.intervals, root);
+            if (score < 0.5f) continue; // Minimum threshold
+
+            // Insert into top-3 if it beats the weakest entry (chordId = index into chordDefs)
+            ChordMatch candidate { static_cast<int> (idx), root, score };
+            for (auto& slot : top)
+            {
+                if (candidate.score > slot.score)
+                {
+                    std::swap (slot, candidate);
+                }
+            }
+        }
+    }
+
+    return top;
+}
+
+void TheoryEngine::storeMatches (const std::array<ChordMatch, 3>& matches) noexcept
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        atomicMatches[static_cast<size_t> (i)].chordId.store  (matches[static_cast<size_t> (i)].chordId,  std::memory_order_relaxed);
+        atomicMatches[static_cast<size_t> (i)].rootNote.store (matches[static_cast<size_t> (i)].rootNote, std::memory_order_relaxed);
+        atomicMatches[static_cast<size_t> (i)].scoreX1k.store (
+            static_cast<int> (matches[static_cast<size_t> (i)].score * 1000.f), std::memory_order_relaxed);
+    }
+}
+
+// =============================================================================
+// Voice leading
+// =============================================================================
+
+VoicingResult TheoryEngine::computeVoiceLeading (const std::vector<int>& currentNotes,
+                                                  int nextChordIdx,
+                                                  int nextRoot) const
+{
+    VoicingResult result;
+
+    if (nextChordIdx < 0 || nextChordIdx >= static_cast<int> (chordDefs.size()))
+        return result;
+
+    const auto& cd = chordDefs[static_cast<size_t> (nextChordIdx)];
+
+    // Reference octave: centre around the median of current notes
+    int refOctaveMidi = 60; // middle C fallback
+    if (!currentNotes.empty())
+    {
+        int sum = 0;
+        for (int n : currentNotes) sum += n;
+        refOctaveMidi = sum / static_cast<int> (currentNotes.size());
+    }
+
+    const auto candidates = generateInversions (cd.intervals, nextRoot, refOctaveMidi);
+
+    if (candidates.empty()) return result;
+
+    // Find the candidate with the minimum total voice movement
+    const std::vector<int>* best = &candidates.front();
+    int bestCost = std::numeric_limits<int>::max();
+
+    for (const auto& candidate : candidates)
+    {
+        const int cost = totalVoiceMovement (currentNotes, candidate);
+        if (cost < bestCost)
+        {
+            bestCost = cost;
+            best = &candidate;
+        }
+    }
+
+    // Fill VoicingResult
+    result.numNotes = std::min (static_cast<int> (best->size()), VoicingResult::kMaxNotes);
+    for (int i = 0; i < result.numNotes; ++i)
+        result.notes[static_cast<size_t> (i)] = (*best)[static_cast<size_t> (i)];
+
+    return result;
+}
+
+std::vector<std::vector<int>> TheoryEngine::generateInversions (
+    const std::vector<int>& intervals,
+    int root,
+    int referenceOctaveMidi) const
+{
+    if (intervals.empty()) return {};
+
+    const int numNotes = static_cast<int> (intervals.size());
+
+    // Build root-position notes centred near referenceOctaveMidi
+    // Find the octave of root closest to reference
+    int rootBase = (referenceOctaveMidi / 12) * 12 + (root % 12);
+    if (rootBase < referenceOctaveMidi - 6) rootBase += 12;
+    if (rootBase > referenceOctaveMidi + 6) rootBase -= 12;
+
+    // Root-position voicing
+    std::vector<int> rootPos;
+    rootPos.reserve (static_cast<size_t> (numNotes));
+    for (int iv : intervals)
+        rootPos.push_back (juce::jlimit (0, 127, rootBase + iv));
+
+    // Generate all numNotes inversions by rotating the interval stack
+    std::vector<std::vector<int>> candidates;
+    candidates.reserve (static_cast<size_t> (numNotes * 2 + 1));
+
+    std::vector<int> rotated = rootPos;
+    for (int inv = 0; inv < numNotes; ++inv)
+    {
+        candidates.push_back (rotated);
+
+        // Rotate: lowest note goes up one octave
+        std::sort (rotated.begin(), rotated.end());
+        rotated.front() += 12;
+        std::sort (rotated.begin(), rotated.end());
+
+        // Clamp to valid MIDI range
+        for (auto& n : rotated)
+            n = juce::jlimit (0, 127, n);
+    }
+
+    // Also add octave-shifted versions of root position (up and down)
+    auto upOctave = rootPos;
+    for (auto& n : upOctave) n = juce::jlimit (0, 127, n + 12);
+    candidates.push_back (upOctave);
+
+    auto downOctave = rootPos;
+    for (auto& n : downOctave) n = juce::jlimit (0, 127, n - 12);
+    candidates.push_back (downOctave);
+
+    return candidates;
+}
+
+// static
+int TheoryEngine::totalVoiceMovement (const std::vector<int>& a,
+                                      const std::vector<int>& b) noexcept
+{
+    if (a.empty() || b.empty()) return std::numeric_limits<int>::max();
+
+    std::vector<int> sa = a, sb = b;
+    std::sort (sa.begin(), sa.end());
+    std::sort (sb.begin(), sb.end());
+
+    // Pair voices by index (handle size mismatch by using the shorter)
+    const int n = std::min (static_cast<int> (sa.size()), static_cast<int> (sb.size()));
+    int total = 0;
+    for (int i = 0; i < n; ++i)
+        total += std::abs (sa[static_cast<size_t> (i)] - sb[static_cast<size_t> (i)]);
+
+    return total;
+}
+
+// =============================================================================
+// Database — open / close / schema / seed / load
+// =============================================================================
+
+bool TheoryEngine::openDatabase (const juce::File& dbFile)
+{
+    // Create parent directory if it doesn't exist
+    dbFile.getParentDirectory().createDirectory();
+
+    const int rc = sqlite3_open (dbFile.getFullPathName().toRawUTF8(), &db);
+    if (rc != SQLITE_OK)
+    {
+        sqlite3_close (db);
+        db = nullptr;
+        return false;
+    }
+
+    // Enable WAL mode for better concurrent read performance
+    sqlite3_exec (db, "PRAGMA journal_mode=WAL;", nullptr, nullptr, nullptr);
+    sqlite3_exec (db, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, nullptr);
+    return true;
+}
+
+void TheoryEngine::closeDatabase() noexcept
+{
+    if (db)
+    {
+        sqlite3_close (db);
+        db = nullptr;
+    }
+}
+
+void TheoryEngine::createSchema()
+{
+    if (!db) return;
+
+    const char* sql = R"SQL(
+        CREATE TABLE IF NOT EXISTS chords (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT NOT NULL,
+            symbol           TEXT NOT NULL,
+            interval_pattern TEXT NOT NULL,   -- JSON: [0,4,7]
+            category         TEXT NOT NULL,   -- triad/seventh/ninth/extended/sus
+            quality          TEXT NOT NULL    -- major/minor/dominant/diminished/augmented
+        );
+
+        CREATE TABLE IF NOT EXISTS scales (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            name             TEXT NOT NULL,
+            interval_pattern TEXT NOT NULL,   -- JSON: [0,2,4,5,7,9,11]
+            mode_family      TEXT NOT NULL    -- major/minor/pentatonic/exotic/chromatic
+        );
+
+        CREATE TABLE IF NOT EXISTS chord_sets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            author     TEXT DEFAULT 'Wolf Den Factory',
+            genre      TEXT,
+            mood       TEXT,
+            energy     TEXT,          -- Low / Medium / High
+            root_note  INTEGER DEFAULT 0,
+            scale_id   INTEGER REFERENCES scales(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS chord_set_entries (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            chord_set_id INTEGER NOT NULL REFERENCES chord_sets(id),
+            position     INTEGER NOT NULL,   -- 1-based order
+            root_note    INTEGER NOT NULL,   -- 0=C, 1=C#, ... 11=B
+            chord_id     INTEGER NOT NULL REFERENCES chords(id),
+            voicing      TEXT,               -- JSON: specific MIDI note layout
+            motion_id    INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS presets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            author     TEXT,
+            tags       TEXT,          -- JSON array of tag strings
+            category   TEXT,
+            created_at INTEGER DEFAULT (strftime('%s','now')),
+            state_blob BLOB
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_chord_set_entries_set ON chord_set_entries(chord_set_id);
+        CREATE INDEX IF NOT EXISTS idx_chord_sets_genre      ON chord_sets(genre);
+        CREATE INDEX IF NOT EXISTS idx_chord_sets_mood       ON chord_sets(mood);
+    )SQL";
+
+    char* errMsg = nullptr;
+    sqlite3_exec (db, sql, nullptr, nullptr, &errMsg);
+    if (errMsg) sqlite3_free (errMsg);
+}
+
+// =============================================================================
+// Database — seed
+// =============================================================================
+
+void TheoryEngine::seedDatabase()
+{
+    if (!db) return;
+
+    // Check if chords table already has data
+    sqlite3_stmt* stmt = nullptr;
+    int count = 0;
+    if (sqlite3_prepare_v2 (db, "SELECT COUNT(*) FROM chords;", -1, &stmt, nullptr) == SQLITE_OK)
+    {
+        if (sqlite3_step (stmt) == SQLITE_ROW)
+            count = sqlite3_column_int (stmt, 0);
+        sqlite3_finalize (stmt);
+    }
+    if (count > 0) return; // Already seeded
+
+    // -------------------------------------------------------------------------
+    // BEGIN TRANSACTION for fast bulk insert
+    // -------------------------------------------------------------------------
+    sqlite3_exec (db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+
+    // =========================================================================
+    // 1. CHORD DEFINITIONS  (42 types)
+    // =========================================================================
+    const char* chordSql = R"SQL(
+    INSERT INTO chords (name,symbol,interval_pattern,category,quality) VALUES
+      ('Major',              'maj',     '[0,4,7]',              'triad',    'major'),
+      ('Minor',              'm',       '[0,3,7]',              'triad',    'minor'),
+      ('Diminished',         'dim',     '[0,3,6]',              'triad',    'diminished'),
+      ('Augmented',          'aug',     '[0,4,8]',              'triad',    'augmented'),
+      ('Suspended 2nd',      'sus2',    '[0,2,7]',              'sus',      'major'),
+      ('Suspended 4th',      'sus4',    '[0,5,7]',              'sus',      'major'),
+      ('Power',              '5',       '[0,7]',                'triad',    'major'),
+      ('Major 6th',          'maj6',    '[0,4,7,9]',            'seventh',  'major'),
+      ('Minor 6th',          'm6',      '[0,3,7,9]',            'seventh',  'minor'),
+      ('Dominant 7th',       '7',       '[0,4,7,10]',           'seventh',  'dominant'),
+      ('Major 7th',          'maj7',    '[0,4,7,11]',           'seventh',  'major'),
+      ('Minor 7th',          'm7',      '[0,3,7,10]',           'seventh',  'minor'),
+      ('Diminished 7th',     'dim7',    '[0,3,6,9]',            'seventh',  'diminished'),
+      ('Half-Diminished',    'm7b5',    '[0,3,6,10]',           'seventh',  'diminished'),
+      ('Minor/Major 7th',    'mMaj7',   '[0,3,7,11]',           'seventh',  'minor'),
+      ('Augmented Major 7th','augMaj7', '[0,4,8,11]',           'seventh',  'augmented'),
+      ('Dominant 7th Sus4',  '7sus4',   '[0,5,7,10]',           'seventh',  'dominant'),
+      ('Major Add 9',        'add9',    '[0,2,4,7]',            'triad',    'major'),
+      ('Minor Add 9',        'madd9',   '[0,2,3,7]',            'triad',    'minor'),
+      ('Dominant 9th',       '9',       '[0,4,7,10,14]',        'ninth',    'dominant'),
+      ('Major 9th',          'maj9',    '[0,4,7,11,14]',        'ninth',    'major'),
+      ('Minor 9th',          'm9',      '[0,3,7,10,14]',        'ninth',    'minor'),
+      ('Dominant 11th',      '11',      '[0,4,7,10,14,17]',     'extended', 'dominant'),
+      ('Major 11th',         'maj11',   '[0,4,7,11,14,17]',     'extended', 'major'),
+      ('Minor 11th',         'm11',     '[0,3,7,10,14,17]',     'extended', 'minor'),
+      ('Dominant 13th',      '13',      '[0,4,7,10,14,21]',     'extended', 'dominant'),
+      ('Major 13th',         'maj13',   '[0,4,7,11,14,21]',     'extended', 'major'),
+      ('Minor 13th',         'm13',     '[0,3,7,10,14,21]',     'extended', 'minor'),
+      ('Dom 7th Flat 9',     '7b9',     '[0,4,7,10,13]',        'extended', 'dominant'),
+      ('Dom 7th Sharp 9',    '7#9',     '[0,4,7,10,15]',        'extended', 'dominant'),
+      ('Dom 7th Flat 5',     '7b5',     '[0,4,6,10]',           'seventh',  'dominant'),
+      ('Dom 7th Sharp 5',    '7#5',     '[0,4,8,10]',           'seventh',  'dominant'),
+      ('Dom 7th Sharp 11',   '7#11',    '[0,4,7,10,18]',        'extended', 'dominant'),
+      ('Major 7th Sharp 11', 'maj7#11', '[0,4,7,11,18]',        'extended', 'major'),
+      ('Minor/Major 9th',    'mMaj9',   '[0,3,7,11,14]',        'ninth',    'minor'),
+      ('Augmented 7th',      'aug7',    '[0,4,8,10]',           'seventh',  'augmented'),
+      ('Quartal',            'qrt',     '[0,5,10]',             'triad',    'major'),
+      ('Quintal',            'qnt',     '[0,7,14]',             'triad',    'major'),
+      ('Neapolitan',         'N',       '[0,1,5,8]',            'triad',    'major'),
+      ('Dominant b9 b13',    '7b9b13',  '[0,4,7,10,13,20]',     'extended', 'dominant'),
+      ('Major 6/9',          '6/9',     '[0,2,4,7,9]',          'extended', 'major'),
+      ('Minor 6/9',          'm6/9',    '[0,2,3,7,9]',          'extended', 'minor');
+    )SQL";
+
+    char* errMsg = nullptr;
+    sqlite3_exec (db, chordSql, nullptr, nullptr, &errMsg);
+    if (errMsg) sqlite3_free (errMsg);
+
+    // =========================================================================
+    // 2. SCALE DEFINITIONS  (58 scales)
+    // =========================================================================
+    const char* scaleSql = R"SQL(
+    INSERT INTO scales (name,interval_pattern,mode_family) VALUES
+      ('Major',                    '[0,2,4,5,7,9,11]',          'major'),
+      ('Natural Minor',            '[0,2,3,5,7,8,10]',          'minor'),
+      ('Harmonic Minor',           '[0,2,3,5,7,8,11]',          'minor'),
+      ('Melodic Minor',            '[0,2,3,5,7,9,11]',          'minor'),
+      ('Dorian',                   '[0,2,3,5,7,9,10]',          'minor'),
+      ('Phrygian',                 '[0,1,3,5,7,8,10]',          'minor'),
+      ('Lydian',                   '[0,2,4,6,7,9,11]',          'major'),
+      ('Mixolydian',               '[0,2,4,5,7,9,10]',          'major'),
+      ('Locrian',                  '[0,1,3,5,6,8,10]',          'minor'),
+      ('Pentatonic Major',         '[0,2,4,7,9]',               'pentatonic'),
+      ('Pentatonic Minor',         '[0,3,5,7,10]',              'pentatonic'),
+      ('Blues',                    '[0,3,5,6,7,10]',            'pentatonic'),
+      ('Chromatic',                '[0,1,2,3,4,5,6,7,8,9,10,11]','chromatic'),
+      ('Whole Tone',               '[0,2,4,6,8,10]',            'exotic'),
+      ('Diminished Half-Whole',    '[0,1,3,4,6,7,9,10]',        'exotic'),
+      ('Diminished Whole-Half',    '[0,2,3,5,6,8,9,11]',        'exotic'),
+      ('Augmented',                '[0,3,4,7,8,11]',            'exotic'),
+      ('Double Harmonic',          '[0,1,4,5,7,8,11]',          'exotic'),
+      ('Phrygian Dominant',        '[0,1,4,5,7,8,10]',          'major'),
+      ('Lydian Dominant',          '[0,2,4,6,7,9,10]',          'major'),
+      ('Lydian Augmented',         '[0,2,4,6,8,9,11]',          'major'),
+      ('Super Locrian',            '[0,1,3,4,6,8,10]',          'minor'),
+      ('Bebop Major',              '[0,2,4,5,7,8,9,11]',        'major'),
+      ('Bebop Minor',              '[0,2,3,4,5,7,9,10]',        'minor'),
+      ('Bebop Dominant',           '[0,2,4,5,7,9,10,11]',       'major'),
+      ('Enigmatic',                '[0,1,4,6,8,10,11]',         'exotic'),
+      ('Neapolitan Major',         '[0,1,3,5,7,9,11]',          'major'),
+      ('Neapolitan Minor',         '[0,1,3,5,7,8,11]',          'minor'),
+      ('Persian',                  '[0,1,4,5,6,8,11]',          'exotic'),
+      ('Arabian',                  '[0,2,4,5,6,8,10]',          'exotic'),
+      ('Hungarian Major',          '[0,3,4,6,7,9,10]',          'major'),
+      ('Hungarian Minor',          '[0,2,3,6,7,8,11]',          'minor'),
+      ('Romanian Minor',           '[0,2,3,6,7,9,10]',          'minor'),
+      ('Spanish',                  '[0,1,3,4,5,7,8,10]',        'minor'),
+      ('Spanish 8-Tone',           '[0,1,3,4,5,6,8,10]',        'minor'),
+      ('Japanese',                 '[0,2,3,7,8]',               'pentatonic'),
+      ('Hirajoshi',                '[0,2,3,7,8]',               'pentatonic'),
+      ('Iwato',                    '[0,1,5,6,10]',              'pentatonic'),
+      ('In Sen',                   '[0,1,5,7,10]',              'pentatonic'),
+      ('Yo',                       '[0,2,5,7,9]',               'pentatonic'),
+      ('Ryukyu',                   '[0,4,5,7,11]',              'pentatonic'),
+      ('Balinese',                 '[0,1,3,7,8]',               'pentatonic'),
+      ('Javanese',                 '[0,1,3,5,7,9,10]',          'exotic'),
+      ('Chinese',                  '[0,4,6,7,11]',              'pentatonic'),
+      ('Egyptian',                 '[0,2,5,7,10]',              'pentatonic'),
+      ('Prometheus',               '[0,2,4,6,9,10]',            'exotic'),
+      ('Tritone',                  '[0,1,4,6,7,10]',            'exotic'),
+      ('Two Semitone Tritone',     '[0,1,2,6,7,8]',             'exotic'),
+      ('Flamenco',                 '[0,1,4,5,7,8,11]',          'exotic'),
+      ('Gypsy Major',              '[0,2,3,6,7,8,11]',          'exotic'),
+      ('Gypsy Minor',              '[0,2,3,6,7,8,10]',          'minor'),
+      ('Byzantine',                '[0,1,4,5,7,8,11]',          'exotic'),
+      ('Hawaiian',                 '[0,2,3,5,7,9,11]',          'minor'),
+      ('Overtone',                 '[0,2,4,6,7,9,10]',          'major'),
+      ('Leading Whole-Tone',       '[0,2,4,6,8,10,11]',         'exotic'),
+      ('Altered',                  '[0,1,3,4,6,8,11]',          'minor'),
+      ('Acoustic',                 '[0,2,4,6,7,9,10]',          'major'),
+      ('Pelog',                    '[0,1,3,6,7]',               'pentatonic');
+    )SQL";
+
+    sqlite3_exec (db, scaleSql, nullptr, nullptr, &errMsg);
+    if (errMsg) sqlite3_free (errMsg);
+
+    // =========================================================================
+    // 3. CHORD SETS  (216 sets: 18 progressions × 12 keys)
+    //    chord_id references:  1=maj  2=m  3=dim  5=sus2  6=sus4
+    //                         10=dom7  11=maj7  12=m7  14=m7b5  21=maj9  22=m9
+    // =========================================================================
+
+    //  Helper: note names for set naming
+    const char* noteNames[12] = { "C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B" };
+
+    // Scale IDs for progressions (1-based from the scales insert above)
+    // 1=Major  2=Natural Minor  5=Dorian  6=Phrygian  8=Mixolydian  10=Pent.Major
+    // 11=Pent.Minor  12=Blues
+
+    struct ProgEntry { int rootOffset; int chordIdx; }; // rootOffset = semitones from key root
+
+    struct Progression
+    {
+        const char* genre;
+        const char* mood;
+        const char* energy;
+        int scaleId;                       // references scales table
+        std::vector<ProgEntry> entries;    // { rootOffset, chordIdx(1-based) }
+    };
+
+    // 18 progressions (entries use 1-based chord IDs from the chords table insert)
+    const std::vector<Progression> progs = {
+        { "Pop",       "Bright",    "Medium", 1,  {{0,11},{7,1},{9,12},{5,1}} },   // I-V-vi-IV (maj7 variant)
+        { "Pop",       "Emotive",   "Medium", 2,  {{0,2},{10,1},{8,1},{10,1}} },   // i-VII-VI-VII
+        { "Rock",      "Energetic", "High",   1,  {{0,1},{5,1},{7,1},{0,1}} },     // I-IV-V-I
+        { "Jazz",      "Sophisticated","Medium",1, {{2,12},{7,10},{0,11},{0,11}} }, // ii7-V7-Imaj7
+        { "Pop",       "Nostalgic", "Low",    1,  {{0,1},{9,2},{5,1},{7,1}} },     // I-vi-IV-V
+        { "Electronic","Dark",      "High",   2,  {{0,2},{8,2},{3,1},{10,1}} },    // i-VI-III-VII
+        { "Cinematic", "Dramatic",  "High",   2,  {{0,2},{10,1},{8,1},{5,1}} },    // i-VII-VI-IV
+        { "Lo-Fi",     "Peaceful",  "Low",    5,  {{0,12},{5,12},{7,12},{2,12}} }, // im7-IVm7-Vm7-IIm7 (Dorian)
+        { "R&B",       "Smooth",    "Medium", 1,  {{0,11},{2,12},{7,10},{0,11}} }, // Imaj7-IIm7-V7-Imaj7
+        { "Blues",     "Soulful",   "Medium", 12, {{0,10},{5,10},{7,10},{5,10}} }, // I7-IV7-V7-IV7
+        { "Cinematic", "Tense",     "High",   2,  {{0,14},{3,1},{8,1},{7,10}} },   // im7b5-III-VI-V7
+        { "Ambient",   "Dreamy",    "Low",    7,  {{0,11},{7,11},{2,12},{9,12}} }, // Imaj7-Vmaj7-IIm7-VIm7 (Lydian)
+        { "Electronic","Euphoric",  "High",   1,  {{0,1},{2,2},{5,1},{7,1}} },     // I-II-IV-V
+        { "Jazz",      "Complex",   "Medium", 1,  {{9,12},{2,12},{7,10},{0,11}} }, // vim7-IIm7-V7-Imaj7
+        { "Pop",       "Dark",      "Medium", 2,  {{0,12},{8,11},{3,11},{7,10}} }, // im7-VImaj7-IIImaj7-V7
+        { "Rock",      "Anthemic",  "High",   8,  {{0,1},{10,1},{5,1},{0,1}} },    // I-bVII-IV-I (Mixolydian)
+        { "Flamenco",  "Passionate","High",   6,  {{0,2},{10,1},{8,1},{7,10}} },   // i-VII-VI-V (Phrygian)
+        { "Trap",      "Hard",      "High",   11, {{0,2},{10,1},{8,1},{10,1}} },   // i-VII-VI-VII minor pent
+    };
+
+    // Insert chord sets for all 12 keys × 18 progressions
+    for (int key = 0; key < 12; ++key)
+    {
+        for (int pi = 0; pi < (int) progs.size(); ++pi)
+        {
+            const auto& prog = progs[static_cast<size_t> (pi)];
+            const char* rootName = noteNames[key];
+
+            // Build set name
+            std::string setName = std::string (rootName) + " " + prog.genre + " " + prog.mood;
+
+            // Insert chord_set row
+            std::string insertSet =
+                "INSERT INTO chord_sets (name,genre,mood,energy,root_note,scale_id) VALUES ('"
+                + setName + "','"
+                + prog.genre + "','"
+                + prog.mood + "','"
+                + prog.energy + "',"
+                + std::to_string (key) + ","
+                + std::to_string (prog.scaleId) + ");";
+
+            sqlite3_exec (db, insertSet.c_str(), nullptr, nullptr, nullptr);
+
+            // Get the inserted row id
+            const sqlite3_int64 setId = sqlite3_last_insert_rowid (db);
+
+            // Insert entries
+            for (int pos = 0; pos < (int) prog.entries.size(); ++pos)
+            {
+                const auto& entry = prog.entries[static_cast<size_t> (pos)];
+                const int entryRoot = (key + entry.rootOffset) % 12;
+
+                std::string insertEntry =
+                    "INSERT INTO chord_set_entries (chord_set_id,position,root_note,chord_id) VALUES ("
+                    + std::to_string (setId) + ","
+                    + std::to_string (pos + 1) + ","
+                    + std::to_string (entryRoot) + ","
+                    + std::to_string (entry.chordIdx) + ");";
+
+                sqlite3_exec (db, insertEntry.c_str(), nullptr, nullptr, nullptr);
+            }
+        }
+    }
+
+    sqlite3_exec (db, "COMMIT;", nullptr, nullptr, nullptr);
+}
+
+// =============================================================================
+// Database — load into memory
+// =============================================================================
+
+void TheoryEngine::loadChordDefinitions()
+{
+    if (!db) return;
+    chordDefs.clear();
+
+    sqlite3_stmt* stmt = nullptr;
+    const int rc = sqlite3_prepare_v2 (db,
+        "SELECT id, name, symbol, interval_pattern, category, quality FROM chords ORDER BY id;",
+        -1, &stmt, nullptr);
+
+    if (rc != SQLITE_OK) return;
+
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+        ChordDefinition cd;
+        cd.id       = sqlite3_column_int  (stmt, 0);
+        cd.name     = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 1));
+        cd.symbol   = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 2));
+        cd.intervals = parseIntervalJson (reinterpret_cast<const char*> (sqlite3_column_text (stmt, 3)));
+        cd.category = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 4));
+        cd.quality  = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 5));
+        chordDefs.push_back (std::move (cd));
+    }
+    sqlite3_finalize (stmt);
+}
+
+void TheoryEngine::loadScaleDefinitions()
+{
+    if (!db) return;
+    scaleDefs.clear();
+
+    sqlite3_stmt* stmt = nullptr;
+    const int rc = sqlite3_prepare_v2 (db,
+        "SELECT id, name, interval_pattern, mode_family FROM scales ORDER BY id;",
+        -1, &stmt, nullptr);
+
+    if (rc != SQLITE_OK) return;
+
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+        ScaleDefinition sd;
+        sd.id         = sqlite3_column_int  (stmt, 0);
+        sd.name       = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 1));
+        sd.intervals  = parseIntervalJson (reinterpret_cast<const char*> (sqlite3_column_text (stmt, 2)));
+        sd.modeFamily = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 3));
+        scaleDefs.push_back (std::move (sd));
+    }
+    sqlite3_finalize (stmt);
+}
+
+// =============================================================================
+// Static helpers
+// =============================================================================
+
+// static
+std::vector<int> TheoryEngine::parseIntervalJson (const std::string& json)
+{
+    return parseIntervalJsonImpl (json);
+}
+
+// static
+std::string TheoryEngine::buildIntervalJson (const std::vector<int>& iv)
+{
+    return buildIntervalJsonImpl (iv);
+}
+
 } // namespace wolfsden

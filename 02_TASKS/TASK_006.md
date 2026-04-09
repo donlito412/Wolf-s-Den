@@ -1,6 +1,6 @@
 TASK ID: 006
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Build the MIDI Transformation Pipeline — the Performance Engine layer that sits between MIDI input and the Synthesis Engine. This includes Keys Lock (scale remapping), Chord Mode (interval-based chord generation), and the Arpeggiator (step-sequenced note playback). All three systems must be independently toggle-able and chain correctly in sequence.
