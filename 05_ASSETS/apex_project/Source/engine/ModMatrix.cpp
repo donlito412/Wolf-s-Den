@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include <juce_core/juce_core.h>
+#include <juce_data_structures/juce_data_structures.h>
 
 namespace wolfsden
 {
@@ -126,6 +127,62 @@ float ModMatrix::getPitchBendValue() const noexcept
     return pitchBendBipolar.load(std::memory_order_relaxed);
 }
 
+juce::ValueTree ModMatrix::toValueTree() const
+{
+    juce::ValueTree root("ModMatrix");
+    for (int i = 0; i < kSlots; ++i)
+    {
+        juce::ValueTree s("Slot");
+        s.setProperty("i", i, nullptr);
+        s.setProperty("src", slotSrc[(size_t)i].load(std::memory_order_relaxed), nullptr);
+        s.setProperty("tgt", slotTgt[(size_t)i].load(std::memory_order_relaxed), nullptr);
+        s.setProperty("amt", slotAmt[(size_t)i].load(std::memory_order_relaxed), nullptr);
+        s.setProperty("sm", slotSmooth[(size_t)i].load(std::memory_order_relaxed), nullptr);
+        s.setProperty("fl", slotFlags[(size_t)i].load(std::memory_order_relaxed), nullptr);
+        root.appendChild(s, nullptr);
+    }
+    root.setProperty("xyX", getXyX(), nullptr);
+    root.setProperty("xyY", getXyY(), nullptr);
+    root.setProperty("mw", modWheel01.load(std::memory_order_relaxed), nullptr);
+    root.setProperty("at", aftertouch01.load(std::memory_order_relaxed), nullptr);
+    root.setProperty("pb", pitchBendBipolar.load(std::memory_order_relaxed), nullptr);
+    return root;
+}
+
+void ModMatrix::fromValueTree(const juce::ValueTree& v) noexcept
+{
+    if (!v.isValid() || !v.hasType("ModMatrix"))
+        return;
+    for (auto& z : smoothZ)
+        z = 0.f;
+    for (int i = 0; i < kSlots; ++i)
+    {
+        slotSrc[(size_t)i].store(Off, std::memory_order_relaxed);
+        slotTgt[(size_t)i].store(None, std::memory_order_relaxed);
+        slotAmt[(size_t)i].store(0.f, std::memory_order_relaxed);
+        slotSmooth[(size_t)i].store(0.f, std::memory_order_relaxed);
+        slotFlags[(size_t)i].store(0, std::memory_order_relaxed);
+    }
+    for (int ci = 0; ci < v.getNumChildren(); ++ci)
+    {
+        const auto s = v.getChild(ci);
+        if (!s.hasType("Slot"))
+            continue;
+        const int i = (int)s.getProperty("i", -1);
+        if (i < 0 || i >= kSlots)
+            continue;
+        slotSrc[(size_t)i].store((int)s.getProperty("src", Off), std::memory_order_relaxed);
+        slotTgt[(size_t)i].store((int)s.getProperty("tgt", None), std::memory_order_relaxed);
+        slotAmt[(size_t)i].store((float)s.getProperty("amt", 0.f), std::memory_order_relaxed);
+        slotSmooth[(size_t)i].store((float)s.getProperty("sm", 0.f), std::memory_order_relaxed);
+        slotFlags[(size_t)i].store((int)s.getProperty("fl", 0), std::memory_order_relaxed);
+    }
+    setXy((float)v.getProperty("xyX", 0.5f), (float)v.getProperty("xyY", 0.5f));
+    modWheel01.store(juce::jlimit(0.f, 1.f, (float)v.getProperty("mw", 0.f)), std::memory_order_relaxed);
+    aftertouch01.store(juce::jlimit(0.f, 1.f, (float)v.getProperty("at", 0.f)), std::memory_order_relaxed);
+    pitchBendBipolar.store(juce::jlimit(-1.f, 1.f, (float)v.getProperty("pb", 0.f)), std::memory_order_relaxed);
+}
+
 void ModMatrix::evaluate(float globalLfoBipolar,
                          float filtEnv01,
                          float ampEnv01,
@@ -133,6 +190,9 @@ void ModMatrix::evaluate(float globalLfoBipolar,
                          float pitchBend,
                          float layerCutSemi[4],
                          float layerResAdd[4],
+                         float layerPitchSemi[4],
+                         float layerAmpMul[4],
+                         float layerPanAdd[4],
                          float& lfoRateMul,
                          float& lfoDepthAdd,
                          float& masterMul,
@@ -144,8 +204,11 @@ void ModMatrix::evaluate(float globalLfoBipolar,
     juce::ignoreUnused(sampleRate);
     for (int L = 0; L < 4; ++L)
     {
-        layerCutSemi[(size_t)L] = 0.f;
-        layerResAdd[(size_t)L] = 0.f;
+        layerCutSemi[(size_t)L]   = 0.f;
+        layerResAdd[(size_t)L]    = 0.f;
+        layerPitchSemi[(size_t)L] = 0.f;
+        layerAmpMul[(size_t)L]    = 1.f;  // multiplicative: 1 = unity
+        layerPanAdd[(size_t)L]    = 0.f;
     }
     lfoRateMul = 1.f;
     lfoDepthAdd = 0.f;
@@ -236,11 +299,23 @@ void ModMatrix::evaluate(float globalLfoBipolar,
             case Layer1_FilterCutoffSemi:
                 applyLayerCut(1, c * 48.f);
                 break;
+            case Layer1_FilterRes:
+                if (ls == 0 || ls == 2)
+                    layerResAdd[1] += c * 0.4f;
+                break;
             case Layer2_FilterCutoffSemi:
                 applyLayerCut(2, c * 48.f);
                 break;
+            case Layer2_FilterRes:
+                if (ls == 0 || ls == 3)
+                    layerResAdd[2] += c * 0.4f;
+                break;
             case Layer3_FilterCutoffSemi:
                 applyLayerCut(3, c * 48.f);
+                break;
+            case Layer3_FilterRes:
+                if (ls == 0 || ls == 4)
+                    layerResAdd[3] += c * 0.4f;
                 break;
             case LFO_RateMul:
                 lfoRateMul += c * 0.5f;
@@ -260,9 +335,64 @@ void ModMatrix::evaluate(float globalLfoBipolar,
             case Fx_ChorusMixAdd:
                 fxChorusMixAdd += c * 0.45f;
                 break;
+
+            // --- Per-layer pitch modulation (vibrato) ---
+            // Scale: c * 24 gives ±24 semitones at full mod amount.
+            case Layer0_PitchSemi:
+                if (ls == 0 || ls == 1) layerPitchSemi[0] += c * 24.f;
+                break;
+            case Layer1_PitchSemi:
+                if (ls == 0 || ls == 2) layerPitchSemi[1] += c * 24.f;
+                break;
+            case Layer2_PitchSemi:
+                if (ls == 0 || ls == 3) layerPitchSemi[2] += c * 24.f;
+                break;
+            case Layer3_PitchSemi:
+                if (ls == 0 || ls == 4) layerPitchSemi[3] += c * 24.f;
+                break;
+
+            // --- Per-layer amplitude modulation (tremolo) ---
+            // c is bipolar [-1..1]; full negative (-1) halves level, full positive (+1) adds 35%.
+            // Applied multiplicatively: layerAmpMul[L] *= (1.0 + c * 0.35).
+            case Layer0_AmpMul:
+                if (ls == 0 || ls == 1) layerAmpMul[0] *= juce::jmax(0.f, 1.f + c * 0.35f);
+                break;
+            case Layer1_AmpMul:
+                if (ls == 0 || ls == 2) layerAmpMul[1] *= juce::jmax(0.f, 1.f + c * 0.35f);
+                break;
+            case Layer2_AmpMul:
+                if (ls == 0 || ls == 3) layerAmpMul[2] *= juce::jmax(0.f, 1.f + c * 0.35f);
+                break;
+            case Layer3_AmpMul:
+                if (ls == 0 || ls == 4) layerAmpMul[3] *= juce::jmax(0.f, 1.f + c * 0.35f);
+                break;
+
+            // --- Per-layer pan modulation (auto-pan) ---
+            // c * 0.5 gives ±0.5 pan range at full mod amount (pan is bipolar ±1).
+            case Layer0_PanAdd:
+                if (ls == 0 || ls == 1) layerPanAdd[0] += c * 0.5f;
+                break;
+            case Layer1_PanAdd:
+                if (ls == 0 || ls == 2) layerPanAdd[1] += c * 0.5f;
+                break;
+            case Layer2_PanAdd:
+                if (ls == 0 || ls == 3) layerPanAdd[2] += c * 0.5f;
+                break;
+            case Layer3_PanAdd:
+                if (ls == 0 || ls == 4) layerPanAdd[3] += c * 0.5f;
+                break;
+
             default:
                 break;
         }
+    }
+
+    // Clamp accumulated per-layer values to safe ranges
+    for (int L = 0; L < 4; ++L)
+    {
+        layerPitchSemi[(size_t)L] = juce::jlimit(-48.f, 48.f, layerPitchSemi[(size_t)L]);
+        layerAmpMul[(size_t)L]    = juce::jlimit(0.f, 2.f,   layerAmpMul[(size_t)L]);
+        layerPanAdd[(size_t)L]    = juce::jlimit(-1.f, 1.f,   layerPanAdd[(size_t)L]);
     }
 
     lfoRateMul = juce::jmax(0.1f, lfoRateMul);

@@ -38,6 +38,12 @@ float VoiceLayer::readP(std::atomic<float>* ap, float defV) noexcept
     return ap ? ap->load(std::memory_order_relaxed) : defV;
 }
 
+void VoiceLayer::setBiquadIdentity(dsp::Biquad& b) noexcept
+{
+    b.b0 = 1.0;
+    b.b1 = b.b2 = b.a1 = b.a2 = 0.0;
+}
+
 void VoiceLayer::prepare(double sampleRate,
                          const double* wavetable,
                          int wavetableSize,
@@ -53,12 +59,22 @@ void VoiceLayer::prepare(double sampleRate,
     filtAdsr.setSampleRate(sr);
     lfoLayer.setSampleRate(sr);
     lfoLayer.setShape(0);
+    lfoLayer2.setSampleRate(sr);
+    lfoLayer2.setShape(0);
 }
 
 void VoiceLayer::reset() noexcept
 {
     phaseSin = phaseSaw = phaseSq = triIntegrator = 0;
     phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
+    combBuf.fill(0.0);
+    combWritePos = 0;
+    combDelaySamples = 0;
+    combFeedback = 0.0;
+    uniSin.fill(0.0);
+    uniSaw.fill(0.0);
+    uniSq.fill(0.0);
+    uniTri.fill(0.0);
     for (auto& g : grains)
         g.active = false;
     grainSpawnCounter = 0;
@@ -76,6 +92,10 @@ void VoiceLayer::noteOn(int midiNote, float velocity) noexcept
     currentVel = velocity;
     phaseSin = phaseSaw = phaseSq = phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
     triIntegrator = 0;
+    uniSin.fill(0.0);
+    uniSaw.fill(0.0);
+    uniSq.fill(0.0);
+    uniTri.fill(0.0);
     ampAdsr.noteOn();
     filtAdsr.noteOn();
 }
@@ -189,6 +209,21 @@ double VoiceLayer::processGranular(double hz) noexcept
 
 double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept
 {
+    const int nv = juce::jlimit(1, 8, 1 + (int)std::lround(readP(p.layerUnisonVoices[layerIdx], 0.f) * 7.0));
+    const float detN = readP(p.layerUnisonDetune[layerIdx], 20.f / 75.f);
+    const double detMax = denormTime(detN, 5.0, 80.0);
+    const float spN = readP(p.layerUnisonSpread[layerIdx], 0.5f);
+    const double spreadMul = 0.25 + 1.75 * (double)std::clamp(spN, 0.f, 1.f);
+    const double detNominalHalf = 0.5 * detMax * spreadMul;
+
+    auto centOffset = [&](int v, int nVoices) -> double {
+        if (nVoices <= 1)
+            return 0.0;
+        const double span = 2.0 * detNominalHalf;
+        const int denom = juce::jmax(1, nVoices - 1);
+        return (v - 0.5 * (double)(nVoices - 1)) * (span / (double)denom);
+    };
+
     const double inc = hz / sr;
     const float resN = readP(p.layerRes[layerIdx], 0.3f);
     const double fmIndex = denormRes(resN) * 0.35;
@@ -197,31 +232,91 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
     {
         case 0: // sine
         {
-            phaseSin += inc;
-            if (phaseSin >= 1.0)
-                phaseSin -= 1.0;
-            return std::sin(dsp::twoPi * phaseSin);
+            if (nv <= 1)
+            {
+                phaseSin += inc;
+                if (phaseSin >= 1.0)
+                    phaseSin -= 1.0;
+                return std::sin(dsp::twoPi * phaseSin);
+            }
+            double acc = 0;
+            for (int v = 0; v < nv; ++v)
+            {
+                const double cents = centOffset(v, nv);
+                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double incv = hzv / sr;
+                uniSin[(size_t)v] += incv;
+                if (uniSin[(size_t)v] >= 1.0)
+                    uniSin[(size_t)v] -= 1.0;
+                acc += std::sin(dsp::twoPi * uniSin[(size_t)v]);
+            }
+            return acc / (double)nv;
         }
         case 1: // saw
         {
-            phaseSaw += inc;
-            if (phaseSaw >= 1.0)
-                phaseSaw -= 1.0;
-            return dsp::blepSaw(phaseSaw, inc);
+            if (nv <= 1)
+            {
+                phaseSaw += inc;
+                if (phaseSaw >= 1.0)
+                    phaseSaw -= 1.0;
+                return dsp::blepSaw(phaseSaw, inc);
+            }
+            double acc = 0;
+            for (int v = 0; v < nv; ++v)
+            {
+                const double cents = centOffset(v, nv);
+                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double incv = hzv / sr;
+                uniSaw[(size_t)v] += incv;
+                if (uniSaw[(size_t)v] >= 1.0)
+                    uniSaw[(size_t)v] -= 1.0;
+                acc += dsp::blepSaw(uniSaw[(size_t)v], incv);
+            }
+            return acc / (double)nv;
         }
         case 2: // square
         {
-            phaseSq += inc;
-            if (phaseSq >= 1.0)
-                phaseSq -= 1.0;
-            return dsp::blepSquare(phaseSq, inc);
+            if (nv <= 1)
+            {
+                phaseSq += inc;
+                if (phaseSq >= 1.0)
+                    phaseSq -= 1.0;
+                return dsp::blepSquare(phaseSq, inc);
+            }
+            double acc = 0;
+            for (int v = 0; v < nv; ++v)
+            {
+                const double cents = centOffset(v, nv);
+                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double incv = hzv / sr;
+                uniSq[(size_t)v] += incv;
+                if (uniSq[(size_t)v] >= 1.0)
+                    uniSq[(size_t)v] -= 1.0;
+                acc += dsp::blepSquare(uniSq[(size_t)v], incv);
+            }
+            return acc / (double)nv;
         }
         case 3: // triangle
         {
-            phaseSq += inc;
-            if (phaseSq >= 1.0)
-                phaseSq -= 1.0;
-            return dsp::blepTriangle(triIntegrator, phaseSq, inc);
+            if (nv <= 1)
+            {
+                phaseSq += inc;
+                if (phaseSq >= 1.0)
+                    phaseSq -= 1.0;
+                return dsp::blepTriangle(triIntegrator, phaseSq, inc);
+            }
+            double acc = 0;
+            for (int v = 0; v < nv; ++v)
+            {
+                const double cents = centOffset(v, nv);
+                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double incv = hzv / sr;
+                uniSq[(size_t)v] += incv;
+                if (uniSq[(size_t)v] >= 1.0)
+                    uniSq[(size_t)v] -= 1.0;
+                acc += dsp::blepTriangle(uniTri[(size_t)v], uniSq[(size_t)v], incv);
+            }
+            return acc / (double)nv;
         }
         case 4: // wavetable
         {
@@ -257,6 +352,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
 
 void VoiceLayer::updateFilterCoeffs(int filterType, double cutoffHz, double resonance, double modSemitones) noexcept
 {
+    combDelaySamples = 0;
     double fc = cutoffHz * std::pow(2.0, modSemitones / 12.0);
     fc = juce::jlimit(40.0, sr * 0.45, fc);
     const double Q = juce::jlimit(0.5, 18.0, resonance * 0.12 + 0.55);
@@ -293,7 +389,29 @@ void VoiceLayer::updateFilterCoeffs(int filterType, double cutoffHz, double reso
             f1.setHighPass(sr, fc, Q);
             f2.setHighPass(sr, fc, Q * 0.92);
             break;
+        case 6: // Comb (delay + feedback; coeffs unused)
+        {
+            combDelaySamples = (int)(sr / juce::jmax(50.0, fc));
+            combDelaySamples = juce::jlimit(2, 1024, combDelaySamples);
+            combFeedback = juce::jlimit(0.0, 0.92, (resonance / 42.0) * 0.9);
+            setBiquadIdentity(f1);
+            setBiquadIdentity(f2);
+            f1.z1 = f1.z2 = f2.z1 = f2.z2 = 0;
+            break;
+        }
+        case 7: // Formant (dual band-pass vowel morph)
+        {
+            const double vowel = juce::jlimit(0.0, 1.0, (fc - 150.0) / 8000.0);
+            const double f1f = 320.0 + vowel * 720.0;
+            const double f2f = 900.0 + vowel * 2200.0;
+            const double q = juce::jlimit(2.0, 14.0, 3.0 + resonance * 0.22);
+            f1.setBandPass(sr, f1f, q);
+            f2.setBandPass(sr, f2f, q * 0.92);
+            combDelaySamples = 0;
+            break;
+        }
         default:
+            combDelaySamples = 0;
             f1.setLowPass(sr, fc, Q);
             bypassF2();
             break;
@@ -308,20 +426,28 @@ void VoiceLayer::renderAdd(double& outL,
                            double globalLfoValue,
                            const ParamPointers& p,
                            float modMatrixCutSemi,
-                           float modMatrixResAdd) noexcept
+                           float modMatrixResAdd,
+                           float modMatrixPitchSemi,
+                           float modMatrixAmpMul,
+                           float modMatrixPanAdd) noexcept
 {
     if (ampAdsr.stage == dsp::Adsr::Stage::idle)
         return;
 
     updateAdsrTargets(layerIndex, p);
 
-    const double mPitchSemi = denormTime(readP(p.masterPitch, 0.5f), -48.0, 48.0);
+    // Master pitch (global) + per-layer coarse + mod matrix pitch (vibrato)
+    const double masterPitchSemi = denormTime(readP(p.masterPitch, 0.5f), -48.0, 48.0);
     const int coarse = (int)std::lround(denormTime(readP(p.layerCoarse[layerIndex], 0.5f), -24.0, 24.0));
     const float fineN = readP(p.layerFine[layerIndex], 0.5f);
     const double fineCents = denormTime(fineN, -100.0, 100.0);
 
-    double hz = dsp::midiNoteToHz(midiNote + coarse + (int)std::lround(mPitchSemi));
+    // Combine integer semitone offsets; fractional mod pitch handled via pow(2, semis/12)
+    double hz = dsp::midiNoteToHz(midiNote + coarse + (int)std::lround(masterPitchSemi));
     hz *= std::pow(2.0, fineCents / 1200.0);
+    // Apply mod matrix pitch modulation (vibrato) as a fractional semitone multiplier
+    if (modMatrixPitchSemi != 0.f)
+        hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);
 
     const int oscType = denormChoice(readP(p.layerOsc[layerIndex], 0.f), 8);
     const double osc = processOscillator(oscType, hz, layerIndex, p);
@@ -334,16 +460,39 @@ void VoiceLayer::renderAdd(double& outL,
     const float lfoDep = readP(p.lfoDepth, 0.f);
     const double layerLfo = lfoLayer.tick(0.23 + 0.11 * (double)layerIndex);
 
+    const int lfo2Sh = denormChoice(readP(p.layerLfo2Shape[layerIndex], 0.f), 6);
+    lfoLayer2.setShape(juce::jlimit(0, 5, lfo2Sh));
+    const float lfo2DepN = readP(p.layerLfo2Depth[layerIndex], 0.f);
+    const double lfo2Hz = 0.01 + (double)readP(p.layerLfo2Rate[layerIndex], 0.5f) * (40.0 - 0.01);
+    const double layerLfo2 = lfoLayer2.tick(lfo2Hz);
+
     const double baseCut = denormCutoffSkewed(readP(p.layerCutoff[layerIndex], 0.5f));
     const double resCtrl = denormRes(readP(p.layerRes[layerIndex], 0.2f)) + (double)modMatrixResAdd;
     const double modSemi = filtEnv * 36.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
-                           + (double)modMatrixCutSemi;
+                           + (double)modMatrixCutSemi + layerLfo2 * 10.0 * (double)lfo2DepN;
 
-    const int ftype = denormChoice(readP(p.layerFtype[layerIndex], 0.f), 6);
-    updateFilterCoeffs(juce::jlimit(0, 5, ftype), baseCut, resCtrl, modSemi);
+    const int ftype = juce::jlimit(0, 7, denormChoice(readP(p.layerFtype[layerIndex], 0.f), 8));
+    updateFilterCoeffs(ftype, baseCut, resCtrl, modSemi);
 
-    const double x1 = f1.process(osc);
-    const double y = f2.process(x1);
+    const bool parallel = denormChoice(readP(p.layerFilterRoute[layerIndex], 0.f), 2) == 1;
+
+    double y = 0;
+    if (ftype == 6 && combDelaySamples > 0)
+    {
+        const int d = combDelaySamples;
+        const int wp = combWritePos;
+        const int rp = (wp - d + 2048) % 2048;
+        const double delayed = combBuf[(size_t)rp];
+        y = osc + combFeedback * delayed;
+        combBuf[(size_t)wp] = y;
+        combWritePos = (wp + 1) % 2048;
+    }
+    else if (ftype == 7)
+        y = f2.process(f1.process(osc));
+    else if (parallel)
+        y = 0.5 * (f1.process(osc) + f2.process(osc));
+    else
+        y = f2.process(f1.process(osc));
 
     double sig = y * (double)velocity * ampEnv;
 
@@ -351,7 +500,11 @@ void VoiceLayer::renderAdd(double& outL,
     const float pan = readP(p.layerPan[layerIndex], 0.5f);
     sig *= (double)vol;
 
-    const double panBip = std::clamp((double)pan * 2.0 - 1.0, -1.0, 1.0);
+    // Apply mod matrix amplitude modulation (tremolo): multiplicative, clamped [0, 2]
+    sig *= (double)juce::jlimit(0.f, 2.f, modMatrixAmpMul);
+
+    // Apply mod matrix pan modulation (auto-pan): additive bipolar offset clamped to [-1, 1]
+    const double panBip = std::clamp((double)pan * 2.0 - 1.0 + (double)modMatrixPanAdd, -1.0, 1.0);
     const double pan01 = (panBip + 1.0) * 0.5;
     const double angle = pan01 * dsp::twoPi * 0.25;
     outL += sig * std::cos(angle);

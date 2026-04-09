@@ -4,6 +4,8 @@
 #include <atomic>
 #include <cstdint>
 
+#include <juce_data_structures/juce_data_structures.h>
+
 namespace wolfsden
 {
 
@@ -35,14 +37,32 @@ public:
         Layer0_FilterCutoffSemi,
         Layer0_FilterRes,
         Layer1_FilterCutoffSemi,
+        Layer1_FilterRes,
         Layer2_FilterCutoffSemi,
+        Layer2_FilterRes,
         Layer3_FilterCutoffSemi,
+        Layer3_FilterRes,
         LFO_RateMul,
         LFO_DepthAdd,
         MasterVolumeMul,
         Fx_ReverbMixAdd,
         Fx_DelayMixAdd,
         Fx_ChorusMixAdd,
+        // Per-layer pitch modulation (semitones, ±48 range) — enables vibrato per layer
+        Layer0_PitchSemi,
+        Layer1_PitchSemi,
+        Layer2_PitchSemi,
+        Layer3_PitchSemi,
+        // Per-layer amplitude modulation (multiplicative, centred at 1.0) — enables tremolo
+        Layer0_AmpMul,
+        Layer1_AmpMul,
+        Layer2_AmpMul,
+        Layer3_AmpMul,
+        // Per-layer stereo pan modulation (bipolar additive, ±1.0) — enables auto-pan per layer
+        Layer0_PanAdd,
+        Layer1_PanAdd,
+        Layer2_PanAdd,
+        Layer3_PanAdd,
         NumTargets
     };
 
@@ -69,8 +89,17 @@ public:
     void setPitchBend(float bipolar) noexcept;
     float getPitchBendValue() const noexcept;
 
+    /** Preset / state (message thread). */
+    juce::ValueTree toValueTree() const;
+    void fromValueTree(const juce::ValueTree& v) noexcept;
+
     /**
-     * Per-sample accumulation. layerCutSemi[4] / layerResAdd[4] are additive (semitones / res norm).
+     * Per-sample accumulation.
+     * layerCutSemi[4]   — additive filter cutoff mod in semitones per layer.
+     * layerResAdd[4]    — additive filter resonance mod (normalised) per layer.
+     * layerPitchSemi[4] — additive pitch mod in semitones per layer (vibrato).
+     * layerAmpMul[4]    — multiplicative amplitude mod per layer (tremolo); 1.0 = unity.
+     * layerPanAdd[4]    — additive pan mod (bipolar ±1) per layer (auto-pan).
      * lfoRateMul and masterMul are multiplicative (1 = unity).
      */
     void evaluate(float globalLfoBipolar,
@@ -80,6 +109,9 @@ public:
                   float pitchBendBipolar,
                   float layerCutSemi[4],
                   float layerResAdd[4],
+                  float layerPitchSemi[4],
+                  float layerAmpMul[4],
+                  float layerPanAdd[4],
                   float& lfoRateMul,
                   float& lfoDepthAdd,
                   float& masterMul,

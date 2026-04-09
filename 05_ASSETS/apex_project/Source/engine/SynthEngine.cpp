@@ -49,6 +49,13 @@ void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvt
         ptrs.layerAD[(size_t)i] = apvts.getRawParameterValue(p + "amp_decay");
         ptrs.layerAS[(size_t)i] = apvts.getRawParameterValue(p + "amp_sustain");
         ptrs.layerAR[(size_t)i] = apvts.getRawParameterValue(p + "amp_release");
+        ptrs.layerLfo2Rate[(size_t)i] = apvts.getRawParameterValue(p + "lfo2_rate");
+        ptrs.layerLfo2Depth[(size_t)i] = apvts.getRawParameterValue(p + "lfo2_depth");
+        ptrs.layerLfo2Shape[(size_t)i] = apvts.getRawParameterValue(p + "lfo2_shape");
+        ptrs.layerFilterRoute[(size_t)i] = apvts.getRawParameterValue(p + "filter_routing");
+        ptrs.layerUnisonVoices[(size_t)i] = apvts.getRawParameterValue(p + "unison_voices");
+        ptrs.layerUnisonDetune[(size_t)i] = apvts.getRawParameterValue(p + "unison_detune");
+        ptrs.layerUnisonSpread[(size_t)i] = apvts.getRawParameterValue(p + "unison_spread");
     }
     pointersBound = true;
 }
@@ -275,6 +282,9 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
 
         float layerCutSemi[4];
         float layerResAdd[4];
+        float layerPitchSemi[4];  // per-layer pitch mod (semitones) — vibrato
+        float layerAmpMul[4];     // per-layer amp mod (multiplicative) — tremolo
+        float layerPanAdd[4];     // per-layer pan mod (bipolar additive) — auto-pan
         float lfoRateMul = 1.f;
         float lfoDepthAdd = 0.f;
         float masterMul = 1.f;
@@ -286,6 +296,9 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                            modMatrix.getPitchBendValue(),
                            layerCutSemi,
                            layerResAdd,
+                           layerPitchSemi,
+                           layerAmpMul,
+                           layerPanAdd,
                            lfoRateMul,
                            lfoDepthAdd,
                            masterMul,
@@ -321,7 +334,10 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                                               gLfoToVoice,
                                               ptrs,
                                               layerCutSemi[(size_t)L],
-                                              layerResAdd[(size_t)L]);
+                                              layerResAdd[(size_t)L],
+                                              layerPitchSemi[(size_t)L],
+                                              layerAmpMul[(size_t)L],
+                                              layerPanAdd[(size_t)L]);
         }
 
         const float master = readPtr(ptrs.masterVol, 0.8f);

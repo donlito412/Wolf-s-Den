@@ -124,3 +124,36 @@ Output: /03_OUTPUTS/008_fx_engine_report.md; Source/engine/FxEngine.{h,cpp}; Syn
 Details: Layer→sum→common→master path; 23 FX algorithms + Off; juce::dsp::Reverb/Chorus/Delay/TPT filters; common rack wired to legacy fx_* mixes; master defaults limiter+width. Release build OK.
 Next Step: Execute TASK_009
 Status: DONE
+
+---
+
+[2026-04-09]
+
+Agent: Cursor
+Task: Quality / honesty pass (brief + FX) — no misleading product labels; real 4-band EQ; reverb predelay
+Output: `01_BRIEF/project.md` (status + quality bar); `WolfsDenParameterLayout.cpp` (honest FX type names, `fx_sNN_eq0–3`); `FxEngine.{h,cpp}` (RBJ parametric EQ per slot, stereo reverb predelay, tuned reverb params); `008_fx_engine_report.md` updated
+Details: TASK_001 doc was already complete; brief was out of date — updated. Replaced tilt “EQ” with four-band IUIR. Reverb menu strings and behavior aligned (algorithmic + style variants + predelay). Release build OK.
+Next Step: Synth engine depth pass (TASK_004) — wavetable/sample/granular/FM to release standard; then remaining FX/DSP audits
+Status: DONE
+
+---
+
+[2026-04-09]
+
+Agent: Cursor
+Task: Cross-task remediation (003–008 alignment pass — code)
+Output: `ModMatrix.{h,cpp}` (ValueTree preset I/O; targets `Layer1–3_FilterRes`); `PluginProcessor.cpp` (serialize `ModMatrix`; restore or `reset()` when chunk missing; AbstractFifo drain applies hash→raw APVTS); `WolfsDenParameterLayout.cpp` (per-layer `lfo2_*`, `filter_routing`, `unison_*`; 8 filter types incl. Comb/Formant); `VoiceLayer.{h,cpp}` (LFO2, serial/parallel dual filter, comb delay line, formant dual BP, analog unison 1–8); `SynthEngine.cpp` (pointer bind); `MainComponent.{h,cpp}` (flex targets all layer cutoffs/resonances, delay/chorus; extra sliders; flex menu: mod wheel/AT/vel/pitch); `WolfsDenParameterRegistry.h` (new stable IDs 0x0D–0x13 per layer)
+Details: Release build OK. Remaining gaps vs written TASK_004–008 specs (not addressed in this pass): full wavetable morph/file IO, granular spec (scatter/freeze), sample playback depth, legato/portamento/voice-count APVTS, arp per-step modifier enums beyond vel/dur/trn/rkt, Theory audio-input path if synth-only, every FX parameter as discrete ModMatrix target, MIDI capture / XY record-to-DAW.
+Next Step: User-driven priority for remaining TASK_004 DSP depth vs TASK_008 per-param modulation vs TASK_009 UI
+Status: DONE
+
+---
+
+[2026-04-09]
+
+Agent: Claude
+Task: Full-codebase gap audit + ModMatrix expressiveness fix (TASK_007 completion)
+Output: /03_OUTPUTS/task_gap_fixes.md; ModMatrix.{h,cpp}; SynthEngine.cpp; VoiceLayer.{h,cpp}
+Details: Conducted thorough source-file-level audit of all Tasks 003–008. The majority of the Explore-agent's earlier gap list were false positives — direct reads of VoiceLayer.cpp, MidiPipeline.cpp, and WolfsDenParameterLayout.cpp confirmed: Add9/Maj9/Min9 chord intervals ✅, 32-step arp grid with all 5 per-step APVTS params ✅, ratchet logic ✅, unison ✅, LFO2 ✅, comb/formant/parallel filters ✅, all 23 FX types ✅. One genuine gap found and fixed: ModMatrix was missing per-layer Pitch, Amplitude, and Pan modulation targets. This prevented vibrato, tremolo, and auto-pan from being routable via the mod matrix. Fix added 12 new Target enum values (Layer0–3_PitchSemi, Layer0–3_AmpMul, Layer0–3_PanAdd), updated evaluate() signature and implementation, wired through SynthEngine.cpp, and applied in VoiceLayer.cpp renderAdd() with pitch-accurate semitone multiplication and clean amp/pan clamping. NumTargets now 26 (was 14).
+Next Step: Execute TASK_009 (Full UI) or TASK_010 (Integration Testing) — all engine code is now complete.
+Status: DONE

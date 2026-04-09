@@ -28,6 +28,13 @@ struct ParamPointers
     std::atomic<float>* layerCutoff[4] {};
     std::atomic<float>* layerRes[4] {};
     std::atomic<float>* layerFtype[4] {};
+    std::atomic<float>* layerLfo2Rate[4] {};
+    std::atomic<float>* layerLfo2Depth[4] {};
+    std::atomic<float>* layerLfo2Shape[4] {};
+    std::atomic<float>* layerFilterRoute[4] {};
+    std::atomic<float>* layerUnisonVoices[4] {};
+    std::atomic<float>* layerUnisonDetune[4] {};
+    std::atomic<float>* layerUnisonSpread[4] {};
     std::atomic<float>* layerAA[4] {};
     std::atomic<float>* layerAD[4] {};
     std::atomic<float>* layerAS[4] {};
@@ -42,7 +49,14 @@ public:
     void noteOn(int midiNote, float velocity) noexcept;
     void noteOff() noexcept;
 
-    /** Sum stereo into L/R (accumulate). */
+    /** Sum stereo into L/R (accumulate).
+     *
+     *  modMatrixCutSemi  — additive filter cutoff shift in semitones from mod matrix.
+     *  modMatrixResAdd   — additive filter resonance (normalised) from mod matrix.
+     *  modMatrixPitchSemi— additive pitch shift in semitones from mod matrix (vibrato).
+     *  modMatrixAmpMul   — multiplicative amplitude scale from mod matrix (tremolo); 1.0 = unity.
+     *  modMatrixPanAdd   — additive bipolar pan offset from mod matrix (auto-pan).
+     */
     void renderAdd(double& outL,
                    double& outR,
                    int layerIndex,
@@ -50,8 +64,11 @@ public:
                    float velocity,
                    double globalLfoValue,
                    const ParamPointers& p,
-                   float modMatrixCutSemi = 0.f,
-                   float modMatrixResAdd = 0.f) noexcept;
+                   float modMatrixCutSemi   = 0.f,
+                   float modMatrixResAdd    = 0.f,
+                   float modMatrixPitchSemi = 0.f,
+                   float modMatrixAmpMul    = 1.f,
+                   float modMatrixPanAdd    = 0.f) noexcept;
 
     bool isActive() const noexcept { return ampAdsr.stage != wolfsden::dsp::Adsr::Stage::idle; }
 
@@ -88,8 +105,19 @@ private:
     wolfsden::dsp::Adsr ampAdsr;
     wolfsden::dsp::Adsr filtAdsr;
     wolfsden::dsp::Lfo lfoLayer;
+    wolfsden::dsp::Lfo lfoLayer2;
 
     wolfsden::dsp::Biquad f1, f2;
+
+    std::array<double, 2048> combBuf {};
+    int combWritePos = 0;
+    int combDelaySamples = 0;
+    double combFeedback = 0.0;
+
+    std::array<double, 8> uniSin {};
+    std::array<double, 8> uniSaw {};
+    std::array<double, 8> uniSq {};
+    std::array<double, 8> uniTri {};
 
     float cachedAmpA = -1, cachedAmpD = -1, cachedAmpS = -1, cachedAmpR = -1;
     float cachedFilA = -1, cachedFilD = -1, cachedFilS = -1, cachedFilR = -1;
@@ -101,6 +129,7 @@ private:
     double readWavetable(double phase01) const noexcept;
     double processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept;
     void updateFilterCoeffs(int filterType, double cutoffHz, double resonance, double modSemitones) noexcept;
+    static void setBiquadIdentity(wolfsden::dsp::Biquad& b) noexcept;
     void spawnGrain() noexcept;
     double processGranular(double hz) noexcept;
     static float readP(std::atomic<float>* ap, float defV = 0) noexcept;

@@ -38,6 +38,9 @@ private:
     juce::Slider lfoRateSlider;
     juce::Slider lfoDepthSlider;
     juce::Slider reverbMixSlider;
+    juce::Slider layer0ResSlider;
+    juce::Slider delayMixSlider;
+    juce::Slider chorusMixSlider;
 
     std::unique_ptr<juce::SliderParameterAttachment> attachMasterVol;
     std::unique_ptr<juce::SliderParameterAttachment> attachMasterPan;
@@ -46,6 +49,9 @@ private:
     std::unique_ptr<juce::SliderParameterAttachment> attachLfoRate;
     std::unique_ptr<juce::SliderParameterAttachment> attachLfoDepth;
     std::unique_ptr<juce::SliderParameterAttachment> attachReverbMix;
+    std::unique_ptr<juce::SliderParameterAttachment> attachLayer0Res;
+    std::unique_ptr<juce::SliderParameterAttachment> attachDelayMix;
+    std::unique_ptr<juce::SliderParameterAttachment> attachChorusMix;
 
     std::unique_ptr<PerfXyPad> xyPad;
 

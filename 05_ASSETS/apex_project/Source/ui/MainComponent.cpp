@@ -58,6 +58,20 @@ ModMatrix::Target targetForParamId(const juce::String& id)
         return T::LFO_DepthAdd;
     if (id == "layer0_filter_cutoff")
         return T::Layer0_FilterCutoffSemi;
+    if (id == "layer0_filter_resonance")
+        return T::Layer0_FilterRes;
+    if (id == "layer1_filter_cutoff")
+        return T::Layer1_FilterCutoffSemi;
+    if (id == "layer1_filter_resonance")
+        return T::Layer1_FilterRes;
+    if (id == "layer2_filter_cutoff")
+        return T::Layer2_FilterCutoffSemi;
+    if (id == "layer2_filter_resonance")
+        return T::Layer2_FilterRes;
+    if (id == "layer3_filter_cutoff")
+        return T::Layer3_FilterCutoffSemi;
+    if (id == "layer3_filter_resonance")
+        return T::Layer3_FilterRes;
     if (id == "fx_reverb_mix")
         return T::Fx_ReverbMixAdd;
     if (id == "fx_delay_mix")
@@ -108,6 +122,9 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
     styleSlider(lfoRateSlider, "LFO Rate");
     styleSlider(lfoDepthSlider, "LFO Depth");
     styleSlider(reverbMixSlider, "Reverb Mix");
+    styleSlider(layer0ResSlider, "Layer 1 Filter Resonance");
+    styleSlider(delayMixSlider, "Delay Mix");
+    styleSlider(chorusMixSlider, "Chorus Mix");
 
     addAndMakeVisible(masterVolSlider);
     addAndMakeVisible(masterPanSlider);
@@ -116,6 +133,9 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
     addAndMakeVisible(lfoRateSlider);
     addAndMakeVisible(lfoDepthSlider);
     addAndMakeVisible(reverbMixSlider);
+    addAndMakeVisible(layer0ResSlider);
+    addAndMakeVisible(delayMixSlider);
+    addAndMakeVisible(chorusMixSlider);
 
     attachMasterVol = std::make_unique<juce::SliderParameterAttachment>(
         *dynamic_cast<juce::AudioParameterFloat*>(ap.getParameter("master_volume")), masterVolSlider, nullptr);
@@ -131,14 +151,23 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
         *dynamic_cast<juce::AudioParameterFloat*>(ap.getParameter("lfo_depth")), lfoDepthSlider, nullptr);
     attachReverbMix = std::make_unique<juce::SliderParameterAttachment>(
         *dynamic_cast<juce::AudioParameterFloat*>(ap.getParameter("fx_reverb_mix")), reverbMixSlider, nullptr);
+    attachLayer0Res = std::make_unique<juce::SliderParameterAttachment>(
+        *dynamic_cast<juce::AudioParameterFloat*>(ap.getParameter("layer0_filter_resonance")), layer0ResSlider, nullptr);
+    attachDelayMix = std::make_unique<juce::SliderParameterAttachment>(
+        *dynamic_cast<juce::AudioParameterFloat*>(ap.getParameter("fx_delay_mix")), delayMixSlider, nullptr);
+    attachChorusMix = std::make_unique<juce::SliderParameterAttachment>(
+        *dynamic_cast<juce::AudioParameterFloat*>(ap.getParameter("fx_chorus_mix")), chorusMixSlider, nullptr);
 
     flexSliders = { { &masterVolSlider, "master_volume" },
                     { &masterPanSlider, "master_pan" },
                     { &layer0VolSlider, "layer0_volume" },
                     { &layer0CutoffSlider, "layer0_filter_cutoff" },
+                    { &layer0ResSlider, "layer0_filter_resonance" },
                     { &lfoRateSlider, "lfo_rate" },
                     { &lfoDepthSlider, "lfo_depth" },
-                    { &reverbMixSlider, "fx_reverb_mix" } };
+                    { &reverbMixSlider, "fx_reverb_mix" },
+                    { &delayMixSlider, "fx_delay_mix" },
+                    { &chorusMixSlider, "fx_chorus_mix" } };
 
     for (auto& pr : flexSliders)
         pr.first->addMouseListener(this, false);
@@ -229,6 +258,18 @@ void MainComponent::mouseDown(const juce::MouseEvent& e)
         menu.addItem("Modulate with Random", true, false, [&, tgt] {
             assignSlot(mm, firstFreeModSlot(mm), ModMatrix::Random, tgt);
         });
+        menu.addItem("Modulate with Mod wheel", true, false, [&, tgt] {
+            assignSlot(mm, firstFreeModSlot(mm), ModMatrix::ModWheel, tgt);
+        });
+        menu.addItem("Modulate with Aftertouch", true, false, [&, tgt] {
+            assignSlot(mm, firstFreeModSlot(mm), ModMatrix::Aftertouch, tgt);
+        });
+        menu.addItem("Modulate with Velocity", true, false, [&, tgt] {
+            assignSlot(mm, firstFreeModSlot(mm), ModMatrix::Velocity, tgt);
+        });
+        menu.addItem("Modulate with Pitch bend", true, false, [&, tgt] {
+            assignSlot(mm, firstFreeModSlot(mm), ModMatrix::PitchBend, tgt);
+        });
         menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(pr.first));
         return;
     }
@@ -253,9 +294,12 @@ void MainComponent::resized()
                      &masterPanSlider,
                      &layer0VolSlider,
                      &layer0CutoffSlider,
+                     &layer0ResSlider,
                      &lfoRateSlider,
                      &lfoDepthSlider,
-                     &reverbMixSlider })
+                     &reverbMixSlider,
+                     &delayMixSlider,
+                     &chorusMixSlider })
         s->setBounds(r.removeFromTop(rowH));
 }
 

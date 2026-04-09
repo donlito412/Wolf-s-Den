@@ -113,10 +113,24 @@ void WolfsDenAudioProcessor::drainUiToDspFifo() noexcept
         if (n <= 0)
             break;
 
+        auto applyOne = [this](const UiToDspMessage& m) noexcept {
+            for (auto* param : getParameters())
+            {
+                if (auto* wid = dynamic_cast<juce::AudioProcessorParameterWithID*>(param))
+                {
+                    if ((uint32_t)wid->getParameterID().hashCode() != m.paramIdHash)
+                        continue;
+                    if (auto* rv = apvts.getRawParameterValue(wid->getParameterID()))
+                        rv->store(m.value);
+                    break;
+                }
+            }
+        };
+
         for (int i = 0; i < z1; ++i)
-            juce::ignoreUnused(uiToDspBuffer[(size_t)(s1 + i)]);
+            applyOne(uiToDspBuffer[(size_t)(s1 + i)]);
         for (int i = 0; i < z2; ++i)
-            juce::ignoreUnused(uiToDspBuffer[(size_t)(s2 + i)]);
+            applyOne(uiToDspBuffer[(size_t)(s2 + i)]);
 
         uiToDspFifo.finishedRead(n);
     }
@@ -225,6 +239,8 @@ void WolfsDenAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     custom.setProperty("editorHeight", editorHeight.load(std::memory_order_relaxed), nullptr);
     root.appendChild(custom, nullptr);
 
+    root.appendChild(synthEngine.getModMatrix().toValueTree(), nullptr);
+
     if (auto xml = root.createXml())
         copyXmlToBinary(*xml, destData);
 }
@@ -253,6 +269,11 @@ void WolfsDenAudioProcessor::setStateInformation(const void* data, int sizeInByt
                 editorWidth.store((int)custom.getProperty("editorWidth", 480), std::memory_order_relaxed);
                 editorHeight.store((int)custom.getProperty("editorHeight", 320), std::memory_order_relaxed);
             }
+
+            if (auto mm = root.getChildWithName("ModMatrix"); mm.isValid())
+                synthEngine.getModMatrix().fromValueTree(mm);
+            else
+                synthEngine.getModMatrix().reset();
         }
         else if (root.hasType(apvts.state.getType()))
         {

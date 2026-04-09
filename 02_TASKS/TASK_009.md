@@ -13,8 +13,9 @@ INPUTS:
 /03_OUTPUTS/004_synthesis_engine_report.md
 /03_OUTPUTS/005_theory_engine_report.md
 /03_OUTPUTS/006_midi_pipeline_report.md
-/03_OUTPUTS/007_modulation_system_report.md
+/03_OUTPUTS/007_modulation_system_report.md  ← READ THIS — target list updated to 26 targets after gap fix
 /03_OUTPUTS/008_fx_engine_report.md
+/03_OUTPUTS/task_gap_fixes.md  ← READ THIS — documents all confirmed-complete features + the ModMatrix gap fix
 /01_BRIEF/vst_research.md
 
 OUTPUT:
