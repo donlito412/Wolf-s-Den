@@ -201,7 +201,7 @@ void BrowsePage::paint(juce::Graphics& g)
 
     auto main = getLocalBounds().reduced(12, 8);
     main.removeFromTop(36);
-    const int detailH = 96;
+    const int detailH = 120;
     auto detail = main.removeFromBottom(detailH);
     g.setColour(Theme::backgroundMid());
     g.fillRoundedRectangle(detail.toFloat().reduced(0.5f), 6.f);
@@ -250,13 +250,15 @@ void BrowsePage::resized()
 {
     auto area = getLocalBounds().reduced(12, 8);
     area.removeFromTop(36);
-    const int detailH = 96;
-    auto gridArea = area.removeFromBottom(detailH);
+    const int detailH = 120;
+    auto detailArea = area.removeFromBottom(detailH); // detail strip at bottom
+    area.removeFromBottom(8);                          // gap above detail
+    // area is now the main sidebar + cards region
     const int gap = 8;
-    const int leftW = juce::jlimit(180, 360, (int) std::lround(gridArea.proportionOfWidth(0.30f)));
-    auto leftCol = gridArea.removeFromLeft(leftW);
-    gridArea.removeFromLeft(gap);
-    auto rightCol = gridArea;
+    const int leftW = juce::jlimit(180, 360, (int) std::lround(area.proportionOfWidth(0.30f)));
+    auto leftCol = area.removeFromLeft(leftW);
+    area.removeFromLeft(gap);
+    auto rightCol = area;
 
     sidebarViewport.setBounds(leftCol);
     const int sw = juce::jmax(120, sidebarViewport.getWidth() - sidebarViewport.getScrollBarThickness());
@@ -269,6 +271,8 @@ void BrowsePage::resized()
     lastGridW = juce::jmax(200, cardViewport.getViewWidth());
     rebuildFilteredIndices();
     rebuildCardGrid();
+
+    juce::ignoreUnused(detailArea); // painted in paint(), not laid out here
 }
 
 void BrowsePage::ensureFiltersBuilt()

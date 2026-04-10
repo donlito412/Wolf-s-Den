@@ -130,6 +130,9 @@ ModPage::ModPage(WolfsDenAudioProcessor& proc)
         rows[(size_t)r].mute.onClick = [this, r] { applyRow(r); };
     }
 
+    xyPhysics.addItem("Direct", 1);
+    xyPhysics.addItem("Inertia", 2);
+    xyPhysics.addItem("Chaos", 3);
     addAndMakeVisible(xyPhysics);
     attXyPhys = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         processor.getAPVTS(), "perf_xy_physics", xyPhysics);
@@ -254,17 +257,20 @@ void ModPage::paint(juce::Graphics& g)
         }
     }
 
-    // Matrix column headers
-    g.setColour(Theme::textSecondary());
-    g.setFont(Theme::fontLabel());
-    auto hdrR = juce::Rectangle<int>(left.getX(), left.getY() - 14, left.getWidth(), 14);
+    // Matrix column headers — positioned after slotPage (26) + gap (6)
+    const int hdrY = r.getY() + 26 + 6;
+    const int aw = left.getWidth();
+    const int srcW  = juce::jmax(70, aw * 22 / 100);
+    const int tgtW  = juce::jmax(80, aw * 26 / 100);
+    const int amtW  = juce::jmax(70, aw * 22 / 100);
+    auto hdrR = juce::Rectangle<int>(left.getX(), hdrY, left.getWidth(), 14);
     auto h = hdrR;
-    g.drawText("Source", h.removeFromLeft(100), juce::Justification::centredLeft);
-    g.drawText("Target", h.removeFromLeft(118), juce::Justification::centredLeft);
-    g.drawText("Amount", h.removeFromLeft(100), juce::Justification::centredLeft);
-    g.drawText("Inv", h.removeFromLeft(36), juce::Justification::centred);
-    g.drawText("M", h.removeFromLeft(28), juce::Justification::centred);
-    g.drawText("Scope", h.removeFromLeft(56), juce::Justification::centred);
+    g.drawText("Source", h.removeFromLeft(srcW), juce::Justification::centredLeft);
+    g.drawText("Target", h.removeFromLeft(tgtW), juce::Justification::centredLeft);
+    g.drawText("Amount", h.removeFromLeft(amtW), juce::Justification::centredLeft);
+    g.drawText("Inv", h.removeFromLeft(32), juce::Justification::centred);
+    g.drawText("M", h.removeFromLeft(26), juce::Justification::centred);
+    g.drawText("Scope", h, juce::Justification::centred);
 
     // XY Pad section labels
     auto rightR = r.withTrimmedLeft(leftW + 8);
@@ -277,22 +283,33 @@ void ModPage::resized()
 {
     auto r = getLocalBounds().reduced(10);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(520, (int)((float)r.getWidth() * 0.42f));
+    const int leftW = juce::jmin(460, (int)((float)r.getWidth() * 0.48f));
     auto left = r.removeFromLeft(leftW);
+    r.removeFromLeft(10);
     auto right = r;
 
     slotPage.setBounds(left.removeFromTop(26));
-    left.removeFromTop(20); // header space
+    left.removeFromTop(6);
+    // Column headers rendered here too so they align
+    left.removeFromTop(16); // header label space
     const int rowH = 28;
+    // Scale columns proportionally to available width
+    const int aw = left.getWidth();
+    const int srcW  = juce::jmax(70, aw * 22 / 100);
+    const int tgtW  = juce::jmax(80, aw * 26 / 100);
+    const int amtW  = juce::jmax(70, aw * 22 / 100);
+    const int invW  = 32;
+    const int mutW  = 26;
+    const int scpW  = juce::jmax(46, aw - srcW - tgtW - amtW - invW - mutW);
     for (int i = 0; i < 8; ++i)
     {
         auto row = left.removeFromTop(rowH);
-        rows[(size_t)i].src.setBounds(row.removeFromLeft(100).reduced(0, 1));
-        rows[(size_t)i].tgt.setBounds(row.removeFromLeft(118).reduced(0, 1));
-        rows[(size_t)i].amt.setBounds(row.removeFromLeft(100).reduced(0, 1));
-        rows[(size_t)i].inv.setBounds(row.removeFromLeft(36).reduced(0, 2));
-        rows[(size_t)i].mute.setBounds(row.removeFromLeft(28).reduced(0, 2));
-        rows[(size_t)i].scope.setBounds(row.removeFromLeft(56).reduced(0, 1));
+        rows[(size_t)i].src.setBounds(row.removeFromLeft(srcW).reduced(0, 1));
+        rows[(size_t)i].tgt.setBounds(row.removeFromLeft(tgtW).reduced(0, 1));
+        rows[(size_t)i].amt.setBounds(row.removeFromLeft(amtW).reduced(0, 1));
+        rows[(size_t)i].inv.setBounds(row.removeFromLeft(invW).reduced(0, 2));
+        rows[(size_t)i].mute.setBounds(row.removeFromLeft(mutW).reduced(0, 2));
+        rows[(size_t)i].scope.setBounds(row.removeFromLeft(scpW).reduced(0, 1));
     }
 
     // Right side: XY pad section

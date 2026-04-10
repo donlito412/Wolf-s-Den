@@ -262,7 +262,7 @@ TheoryPage::TheoryPage(WolfsDenAudioProcessor& proc)
     // Section A: 8 chord pads
     for (int i = 0; i < 8; ++i)
     {
-        chordPads[(size_t)i].setButtonText("–");
+        chordPads[(size_t)i].setButtonText("-");
         chordPads[(size_t)i].setColour(juce::TextButton::buttonColourId, Theme::panelSurface());
         chordPads[(size_t)i].setColour(juce::TextButton::buttonOnColourId, Theme::accentPrimary().withAlpha(0.45f));
         panelBrowse.addAndMakeVisible(chordPads[(size_t)i]);
@@ -350,7 +350,7 @@ void TheoryPage::timerCallback()
     const auto top3 = processor.getTheoryEngine().getTopMatches();
     for (int k = 0; k < 3; ++k)
     {
-        juce::String t = "—";
+        juce::String t = "-";
         const auto& m = top3[(size_t)k];
         if (m.chordId >= 0 && m.score > 0.01f)
         {
