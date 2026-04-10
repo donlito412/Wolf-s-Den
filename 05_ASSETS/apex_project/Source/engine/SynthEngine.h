@@ -23,6 +23,7 @@ public:
 
     /** layerBus: 8 channels (L0,R0,L1,R1,L2,R2,L3,R3) — dry per layer before FX. */
     void process(juce::AudioBuffer<float>& layerBus,
+                 int numSamplesToProcess,
                  juce::MidiBuffer& midi,
                  juce::AudioProcessorValueTreeState& apvts) noexcept;
 

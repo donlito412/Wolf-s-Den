@@ -196,6 +196,7 @@ void SynthEngine::deactivateFinishedVoices() noexcept
 }
 
 void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
+                          int numSamplesToProcess,
                           juce::MidiBuffer& midi,
                           juce::AudioProcessorValueTreeState& apvts) noexcept
 {
@@ -204,11 +205,12 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
         return;
 
     const int numCh = layerBus.getNumChannels();
-    const int numSamples = layerBus.getNumSamples();
+    const int numSamples = numSamplesToProcess;
     if (numCh < 8 || numSamples < 1)
         return;
 
-    layerBus.clear();
+    for (int ch = 0; ch < 8; ++ch)
+        layerBus.clear(ch, 0, numSamples);
 
     float* out0 = layerBus.getWritePointer(0);
     float* out1 = layerBus.getWritePointer(1);

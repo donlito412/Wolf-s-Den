@@ -217,7 +217,7 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     if (synthLayerBus.getNumChannels() < 8 || synthLayerBus.getNumSamples() < n)
         synthLayerBus.setSize(8, n);
 
-    synthEngine.process(synthLayerBus, midi, apvts);
+    synthEngine.process(synthLayerBus, n, midi, apvts);
     fxEngine.processBlock(synthLayerBus,
                           buffer,
                           apvts,
