@@ -116,7 +116,7 @@ void TopBar::paint(juce::Graphics& g)
     
     g.setColour(juce::Colours::red);
     g.setFont(18.0f);
-    g.drawText("v1.0.2", getLocalBounds().reduced(290, 10).withTrimmedRight(180), juce::Justification::centredRight, false);
+    g.drawText("v1.0.3", getLocalBounds().reduced(290, 10).withTrimmedRight(180), juce::Justification::centredRight, false);
 }
 
 void TopBar::resized()

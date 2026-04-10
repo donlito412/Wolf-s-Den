@@ -160,7 +160,6 @@ void SynthEngine::startVoice(int voiceIndex, int note, float velocity) noexcept
     v.age = 0;
     for (auto& L : v.layers)
     {
-        L.reset();
         L.noteOn(note, velocity);
     }
 }
@@ -248,9 +247,21 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
             const auto& m = events[evIx].msg;
             if (m.isNoteOn() && m.getVelocity() > 0)
             {
-                int vi = findFreeVoice();
+                int vi = -1;
+                for (int vIter = 0; vIter < kNumVoices; ++vIter)
+                {
+                    if (voices[(size_t)vIter].active && voices[(size_t)vIter].midiNote == m.getNoteNumber())
+                    {
+                        vi = vIter;
+                        break;
+                    }
+                }
+                
+                if (vi < 0)
+                    vi = findFreeVoice();
                 if (vi < 0)
                     vi = findOldestVoice();
+                
                 startVoice(vi, m.getNoteNumber(), m.getFloatVelocity());
             }
             else if (m.isNoteOff() || (m.isNoteOn() && m.getVelocity() == 0))
