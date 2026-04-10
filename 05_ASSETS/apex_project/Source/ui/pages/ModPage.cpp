@@ -231,7 +231,7 @@ void ModPage::paint(juce::Graphics& g)
     // Color-coded row backgrounds
     auto r = getLocalBounds().reduced(10);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(520, (int)((float)r.getWidth() * 0.42f));
+    const int leftW = juce::jmin(420, (int)((float)r.getWidth() * 0.42f));
     auto left = r.withWidth(leftW);
     left.removeFromTop(32); // slot page combo
 
@@ -283,7 +283,7 @@ void ModPage::resized()
 {
     auto r = getLocalBounds().reduced(10);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(460, (int)((float)r.getWidth() * 0.48f));
+    const int leftW = juce::jmin(420, (int)((float)r.getWidth() * 0.42f));
     auto left = r.removeFromLeft(leftW);
     r.removeFromLeft(10);
     auto right = r;

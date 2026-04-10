@@ -314,7 +314,7 @@ TheoryPage::TheoryPage(WolfsDenAudioProcessor& proc)
         int y = 0;
         for (int i = 0; i < (int)scales.size(); ++i)
         {
-            auto* b = new juce::TextButton(scales[(size_t)i].name);
+            auto* b = exploreBtns.add(new juce::TextButton(scales[(size_t)i].name));
             b->setBounds(0, y, 280, 28);
             b->setColour(juce::TextButton::buttonColourId, Theme::panelSurface());
             b->onClick = [this, i] {
@@ -341,6 +341,7 @@ TheoryPage::TheoryPage(WolfsDenAudioProcessor& proc)
 TheoryPage::~TheoryPage()
 {
     stopTimer();
+    exploreVp.setViewedComponent(nullptr); // disconnect before exploreInner is destroyed
 }
 
 void TheoryPage::timerCallback()

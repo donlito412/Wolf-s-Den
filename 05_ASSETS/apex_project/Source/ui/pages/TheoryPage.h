@@ -104,8 +104,9 @@ private:
     CircleOfFifths cof;
 
     // --- Explore sub-tab ---
+    juce::Component exploreInner;                       // MUST be declared before exploreVp (destroyed after)
     juce::Viewport exploreVp;
-    juce::Component exploreInner;
+    juce::OwnedArray<juce::TextButton> exploreBtns;     // owns the dynamically-created buttons
 
     // --- Colors sub-tab ---
     ColorsGrid colorsGrid;

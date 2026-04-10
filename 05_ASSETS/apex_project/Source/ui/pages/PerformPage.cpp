@@ -383,21 +383,18 @@ PerformPage::PerformPage(WolfsDenAudioProcessor& proc)
     }
     scalePicker.setSelectedId(1, juce::dontSendNotification);
 
-    // --- Populate combo boxes before attaching ---
-    {
-        const char* keysChoices[] = { "Off", "Remap", "Mute", "Chord Tones", "Chord Scales" };
-        for (int i = 0; i < 5; ++i) keysMode.addItem(keysChoices[(size_t)i], i + 1);
-    }
-    {
-        const char* chordChoices[] = { "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4",
+    // --- Populate empty combos (JUCE 8 ComboBoxAttachment needs pre-populated combos) ---
+    // Items MUST match AudioParameterChoice strings exactly
+    for (auto& s : juce::StringArray({ "Off", "Remap", "Mute", "Chord Tones", "Chord Scales" }))
+        keysMode.addItem(s, keysMode.getNumItems() + 1);
+
+    for (auto& s : juce::StringArray({ "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4",
                                         "Maj7", "Min7", "Dom7", "Min7b5", "Dim7",
-                                        "MinMaj7", "Add9", "Maj9", "Min9" };
-        for (int i = 0; i < 15; ++i) chordType.addItem(chordChoices[(size_t)i], i + 1);
-    }
-    {
-        const char* arpChoices[] = { "Up", "Down", "Up-Down", "Order", "Chord", "Random" };
-        for (int i = 0; i < 6; ++i) arpPattern.addItem(arpChoices[(size_t)i], i + 1);
-    }
+                                        "MinMaj7", "Add9", "Maj9", "Min9" }))
+        chordType.addItem(s, chordType.getNumItems() + 1);
+
+    for (auto& s : juce::StringArray({ "Up", "Down", "Up-Down", "Order", "Chord", "Random" }))
+        arpPattern.addItem(s, arpPattern.getNumItems() + 1);
 
     // --- APVTS bindings ---
     attKeys = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, "midi_keys_lock_mode", keysMode);
