@@ -246,6 +246,9 @@ TheoryPage::TheoryPage(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(detectMidi);
     addAndMakeVisible(detectAudio);
 
+    for (auto& s : juce::StringArray({ "Major", "Natural Minor", "Harmonic Minor", "Melodic Minor", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Pent Maj", "Pent Min", "Blues", "Whole Tone", "Diminished", "Chromatic" }))
+        scaleType.addItem(s, scaleType.getNumItems() + 1);
+        
     attRoot = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, "theory_scale_root", scaleRoot);
     attScale = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, "theory_scale_type", scaleType);
     attVL = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, "theory_voice_leading", voiceLead);

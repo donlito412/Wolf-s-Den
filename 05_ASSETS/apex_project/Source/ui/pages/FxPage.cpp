@@ -188,6 +188,17 @@ void FxPage::rebuildRack()
 
         const juce::String typeId = pfx + "type";
         const juce::String mixId  = pfx + "mix";
+        
+        for (auto& s : juce::StringArray({
+            "Off", "Compressor", "Limiter", "Gate", "Parametric EQ (4-band)", 
+            "HPF (12 dB/oct)", "LPF (12 dB/oct)", "Soft Clip", "Hard Clip", 
+            "Bit Crusher", "Waveshaper", "Chorus", "Flanger", "Phaser", "Vibrato", 
+            "Tremolo", "Auto-Pan", "Stereo Delay", "Ping-Pong Delay", 
+            "Reverb (algorithmic hall)", "Reverb (bright / plate-style)", 
+            "Reverb (spring-style decay)", "Stereo width", "Mono blend (L+R)"
+        }))
+            row->type.addItem(s, row->type.getNumItems() + 1);
+
         if (apvts.getParameter(typeId) != nullptr)
             row->cAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, typeId, row->type);
         if (apvts.getParameter(mixId) != nullptr)

@@ -246,6 +246,10 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     addS(apvts, "filter_adsr_release", filEnvR, globalSAtt);
     addS(apvts, "lfo_rate", lfo1Rate, globalSAtt);
     addS(apvts, "lfo_depth", lfo1Depth, globalSAtt);
+    
+    for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "Random", "S&H" }))
+        lfo1Shape.addItem(s, lfo1Shape.getNumItems() + 1);
+        
     addC(apvts, "lfo_shape", lfo1Shape, globalCAtt);
 
     for (auto* s : { &filEnvA, &filEnvD, &filEnvS, &filEnvR, &ampA, &ampD, &ampS, &ampR })
@@ -280,15 +284,25 @@ void SynthPage::bindLayer(int layerIndex)
     addS(apvts, layerKey("tune_fine"),    oscFine,   layerSAtt);
     addS(apvts, layerKey("tune_octave"),  oscOctave, layerSAtt);
     // Filter 1
+    filterType.clear();
+    for (auto& s : juce::StringArray({ "LP24", "LP12", "BP", "HP12", "Notch", "HP24", "Comb", "Formant" }))
+        filterType.addItem(s, filterType.getNumItems() + 1);
     addC(apvts, layerKey("filter_type"),      filterType, layerCAtt);
     addS(apvts, layerKey("filter_cutoff"),    fCut,   layerSAtt);
     addS(apvts, layerKey("filter_resonance"), fRes,   layerSAtt);
     addS(apvts, layerKey("filter_drive"),     fDrive, layerSAtt);
     // Filter 2
+    filter2Type.clear();
+    for (auto& s : juce::StringArray({ "LP24", "LP12", "BP", "HP12", "Notch", "HP24", "Comb", "Formant" }))
+        filter2Type.addItem(s, filter2Type.getNumItems() + 1);
     addC(apvts, layerKey("filter2_type"),      filter2Type, layerCAtt);
     addS(apvts, layerKey("filter2_cutoff"),    fCut2,   layerSAtt);
     addS(apvts, layerKey("filter2_resonance"), fRes2,   layerSAtt);
     addS(apvts, layerKey("filter2_drive"),     fDrive2, layerSAtt);
+    
+    filterRoute.clear();
+    for (auto& s : juce::StringArray({ "Serial", "Parallel" }))
+        filterRoute.addItem(s, filterRoute.getNumItems() + 1);
     addC(apvts, layerKey("filter_routing"), filterRoute, layerCAtt);
     // Granular
     addS(apvts, layerKey("gran_pos"),     granPos,     layerSAtt);
@@ -310,6 +324,9 @@ void SynthPage::bindLayer(int layerIndex)
 
     addS(apvts, layerKey("lfo2_rate"), lfo2Rate, layerSAtt);
     addS(apvts, layerKey("lfo2_depth"), lfo2Depth, layerSAtt);
+    lfo2Shape.clear();
+    for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "Random", "S&H" }))
+        lfo2Shape.addItem(s, lfo2Shape.getNumItems() + 1);
     addC(apvts, layerKey("lfo2_shape"), lfo2Shape, layerCAtt);
 }
 

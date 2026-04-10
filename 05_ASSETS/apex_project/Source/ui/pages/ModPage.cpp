@@ -233,7 +233,8 @@ void ModPage::paint(juce::Graphics& g)
     r.removeFromTop(26);
     const int leftW = juce::jmin(420, (int)((float)r.getWidth() * 0.42f));
     auto left = r.withWidth(leftW);
-    left.removeFromTop(32); // slot page combo
+    left.removeFromTop(28); // match resized title push down
+    left.removeFromTop(32); // slot page combo + gap
 
     const int rowH = 28;
     for (int i = 0; i < 8; ++i)
@@ -257,26 +258,30 @@ void ModPage::paint(juce::Graphics& g)
         }
     }
 
+    // XY Pad section labels
+    auto titleR = r.withTrimmedLeft(leftW + 10);
+    g.setColour(Theme::textSecondary());
+    g.setFont(Theme::fontPanelHeader());
+    g.drawText("XY Performance Pad", titleR.removeFromTop(20), juce::Justification::centred);
+    
+    r.removeFromTop(28); // push BOTH sides down by title height
+    
     // Matrix column headers — positioned after slotPage (26) + gap (6)
     const int hdrY = r.getY() + 26 + 6;
-    const int aw = left.getWidth();
+    const int aw = leftW;
     const int srcW  = juce::jmax(70, aw * 22 / 100);
     const int tgtW  = juce::jmax(80, aw * 26 / 100);
     const int amtW  = juce::jmax(70, aw * 22 / 100);
-    auto hdrR = juce::Rectangle<int>(left.getX(), hdrY, left.getWidth(), 14);
+    auto hdrR = juce::Rectangle<int>(r.getX(), hdrY, aw, 14);
     auto h = hdrR;
+    g.setColour(Theme::textSecondary());
+    g.setFont(Theme::fontLabel());
     g.drawText("Source", h.removeFromLeft(srcW), juce::Justification::centredLeft);
     g.drawText("Target", h.removeFromLeft(tgtW), juce::Justification::centredLeft);
     g.drawText("Amount", h.removeFromLeft(amtW), juce::Justification::centredLeft);
     g.drawText("Inv", h.removeFromLeft(32), juce::Justification::centred);
     g.drawText("M", h.removeFromLeft(26), juce::Justification::centred);
     g.drawText("Scope", h, juce::Justification::centred);
-
-    // XY Pad section labels
-    auto rightR = r.withTrimmedLeft(leftW + 8);
-    g.setColour(Theme::textSecondary());
-    g.setFont(Theme::fontPanelHeader());
-    g.drawText("XY Performance Pad", rightR.removeFromTop(20), juce::Justification::centred);
 }
 
 void ModPage::resized()
@@ -284,6 +289,8 @@ void ModPage::resized()
     auto r = getLocalBounds().reduced(10);
     r.removeFromTop(26);
     const int leftW = juce::jmin(420, (int)((float)r.getWidth() * 0.42f));
+    r.removeFromTop(28); // match title space
+    
     auto left = r.removeFromLeft(leftW);
     r.removeFromLeft(10);
     auto right = r;
@@ -313,9 +320,6 @@ void ModPage::resized()
     }
 
     // Right side: XY pad section
-    right.removeFromTop(24); // title
-    right.removeFromTop(4);
-
     xyPhysics.setBounds(right.removeFromTop(26));
     right.removeFromTop(4);
 
