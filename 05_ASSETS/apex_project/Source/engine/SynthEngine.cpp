@@ -8,6 +8,7 @@
 namespace wolfsden
 {
 namespace
+{
 inline float readPtr(std::atomic<float>* ap, float defV = 0.f) noexcept
 {
     return ap ? ap->load(std::memory_order_relaxed) : defV;
