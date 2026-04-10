@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 
+#include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "engine/FxEngine.h"
@@ -53,12 +54,28 @@ public:
 
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
 
+    /** Shared with on-screen MIDI keyboard(s); merged into processBlock MIDI stream. */
+    juce::MidiKeyboardState& getMidiKeyboardState() noexcept { return midiKeyboardState; }
+
     wolfsden::ModMatrix& getModMatrix() noexcept { return synthEngine.getModMatrix(); }
 
     void setPresetDisplayName(juce::String name);
     juce::String getPresetDisplayName() const;
 
     void setLastEditorBounds(int width, int height);
+
+    wolfsden::TheoryEngine& getTheoryEngine() noexcept { return theoryEngine; }
+    const wolfsden::TheoryEngine& getTheoryEngine() const noexcept { return theoryEngine; }
+    wolfsden::SynthEngine& getSynthEngine() noexcept { return synthEngine; }
+
+    void setTheoryDetectionMidi() noexcept;
+    void setTheoryDetectionAudio() noexcept;
+
+    float getSmoothedCpuLoad() const noexcept { return cpuSmoothed.load(std::memory_order_relaxed); }
+    float getOutputPeakL() const noexcept { return outputPeakL.load(std::memory_order_relaxed); }
+    float getOutputPeakR() const noexcept { return outputPeakR.load(std::memory_order_relaxed); }
+    /** Call from UI timer: returns true if MIDI arrived since last call (one-shot). */
+    bool consumeMidiActivityFlag() noexcept;
 
 private:
     void parameterChanged(const juce::String& parameterID, float newValue) override;
@@ -74,6 +91,8 @@ private:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    juce::MidiKeyboardState midiKeyboardState;
+
     wolfsden::MidiPipeline midiPipeline;
     wolfsden::TheoryEngine theoryEngine;
     wolfsden::SynthEngine synthEngine;
@@ -88,6 +107,11 @@ private:
 
     /** 8 ch: per-layer stereo before FxEngine (L0,R0,…,L3,R3). */
     juce::AudioBuffer<float> synthLayerBus;
+
+    std::atomic<float> outputPeakL { 0.f };
+    std::atomic<float> outputPeakR { 0.f };
+    std::atomic<float> cpuSmoothed { 0.f };
+    std::atomic<int> midiActivityFlag { 0 }; // 1 = flash LED until UI consumes
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WolfsDenAudioProcessor)
 };

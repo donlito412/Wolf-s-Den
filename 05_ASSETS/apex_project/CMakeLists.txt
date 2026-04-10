@@ -28,6 +28,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+juce_add_binary_data(
+    WolfsDenFonts
+    HEADER_NAME WolfsDenFonts.h
+    NAMESPACE WolfsDenFonts
+    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Fonts/InterVariable.ttf"
+)
+
 juce_add_plugin(
     WolfsDen
     COMPANY_NAME "Wolf Productions"
@@ -119,6 +126,16 @@ target_sources(
         Source/engine/FxEngine.cpp
         Source/ui/MainComponent.cpp
         Source/ui/PerfXyPad.cpp
+        Source/ui/theme/UITheme.cpp
+        Source/ui/theme/WolfsDenLookAndFeel.cpp
+        Source/ui/chrome/TopBar.cpp
+        Source/ui/chrome/BottomBar.cpp
+        Source/ui/pages/BrowsePage.cpp
+        Source/ui/pages/SynthPage.cpp
+        Source/ui/pages/PerformPage.cpp
+        Source/ui/pages/FxPage.cpp
+        Source/ui/pages/TheoryPage.cpp
+        Source/ui/pages/ModPage.cpp
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang|AppleClang|GNU")
@@ -138,6 +155,7 @@ target_compile_definitions(
 target_link_libraries(
     WolfsDen
     PRIVATE
+        WolfsDenFonts
         juce::juce_audio_basics
         juce::juce_audio_devices
         juce::juce_audio_formats
@@ -168,4 +186,14 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source" PREFIX "Source" FILES
     Source/engine/FxEngine.cpp
     Source/ui/MainComponent.cpp
     Source/ui/PerfXyPad.cpp
+    Source/ui/theme/UITheme.cpp
+    Source/ui/theme/WolfsDenLookAndFeel.cpp
+    Source/ui/chrome/TopBar.cpp
+    Source/ui/chrome/BottomBar.cpp
+    Source/ui/pages/BrowsePage.cpp
+    Source/ui/pages/SynthPage.cpp
+    Source/ui/pages/PerformPage.cpp
+    Source/ui/pages/FxPage.cpp
+    Source/ui/pages/TheoryPage.cpp
+    Source/ui/pages/ModPage.cpp
 )

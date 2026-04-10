@@ -45,6 +45,18 @@ struct ScaleDefinition
     std::string modeFamily;      // "major" | "minor" | "pentatonic" | "exotic" | "chromatic"
 };
 
+/** One row from `chord_sets` for TASK_009 Browse preset cards. */
+struct ChordSetListing
+{
+    int id = 0;
+    std::string name;
+    std::string author;
+    std::string genre;
+    std::string mood;
+    std::string energy;
+    int scaleId = 0;
+};
+
 /** Pitch-class set: 12 slots indexed C=0 .. B=11 */
 using PitchClassSet = std::array<bool, 12>;
 
@@ -186,6 +198,7 @@ public:
 
     const std::vector<ChordDefinition>& getChordDefinitions() const noexcept { return chordDefs; }
     const std::vector<ScaleDefinition>& getScaleDefinitions() const noexcept { return scaleDefs; }
+    const std::vector<ChordSetListing>& getChordSetListings() const noexcept { return chordSetList; }
     int getChordCount() const noexcept { return static_cast<int> (chordDefs.size()); }
     int getScaleCount() const noexcept { return static_cast<int> (scaleDefs.size()); }
 
@@ -200,6 +213,7 @@ private:
     void seedDatabase   ();                  ///< populate tables when empty
     void loadChordDefinitions ();
     void loadScaleDefinitions ();
+    void loadChordSetListings ();
 
     static std::vector<int> parseIntervalJson (const std::string& json);
     static std::string      buildIntervalJson  (const std::vector<int>& iv);
@@ -248,6 +262,7 @@ private:
 
     std::vector<ChordDefinition> chordDefs;
     std::vector<ScaleDefinition> scaleDefs;
+    std::vector<ChordSetListing> chordSetList;
 
     // =========================================================================
     // Audio ring-buffer  (DSP thread → bg thread, lock-free SPSC)

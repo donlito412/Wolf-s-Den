@@ -6,7 +6,7 @@ namespace wolfsden
 {
 namespace
 {
-constexpr int kPadSize = 300;
+constexpr int kPadSize = 400;
 
 inline juce::Point<float> normFromLocal(juce::Rectangle<float> bounds, juce::Point<float> local) noexcept
 {

@@ -33,6 +33,9 @@ public:
     float getLastFxDelayMixAdd() const noexcept { return lastFxDelayMixAdd; }
     float getLastFxChorusMixAdd() const noexcept { return lastFxChorusMixAdd; }
 
+    /** Active voices with any layer still sounding (same gate as voice stealing). */
+    int countActiveVoices() const noexcept;
+
     SynthEngine(const SynthEngine&) = delete;
     SynthEngine& operator=(const SynthEngine&) = delete;
 

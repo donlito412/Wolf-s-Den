@@ -1,19 +1,31 @@
 #pragma once
 
-#include <memory>
-#include <vector>
+#include "chrome/BottomBar.h"
+#include "chrome/TopBar.h"
+#include "pages/BrowsePage.h"
+#include "pages/FxPage.h"
+#include "pages/ModPage.h"
+#include "pages/PerformPage.h"
+#include "pages/SynthPage.h"
+#include "pages/TheoryPage.h"
+#include "theme/WolfsDenLookAndFeel.h"
 
-#include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <memory>
 
 class WolfsDenAudioProcessor;
 
-namespace wolfsden
+namespace juce
+{
+class MidiKeyboardComponent;
+}
+
+namespace wolfsden::ui
 {
 
-class PerfXyPad;
-
-class MainComponent : public juce::Component
+/** TASK_009 root: top bar, page stack, bottom bar. */
+class MainComponent : public juce::Component,
+                      private juce::Timer
 {
 public:
     explicit MainComponent(WolfsDenAudioProcessor&);
@@ -21,43 +33,41 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
-    void mouseDown(const juce::MouseEvent& e) override;
 
 private:
+    void showPage(int index);
+    void timerCallback() override;
+
+    enum class PageFade { idle, fadingOut, fadingIn };
+
     WolfsDenAudioProcessor& processor;
 
-    juce::Label titleLabel;
-    juce::Label xyPhysicsLabel;
-    juce::ComboBox xyPhysicsCombo;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> xyPhysicsAttachment;
+    std::unique_ptr<WolfsDenLookAndFeel> laf;
+    TopBar topBar;
+    std::unique_ptr<juce::MidiKeyboardComponent> midiKeyboard;
+    BottomBar bottomBar;
 
-    juce::Slider masterVolSlider;
-    juce::Slider masterPanSlider;
-    juce::Slider layer0VolSlider;
-    juce::Slider layer0CutoffSlider;
-    juce::Slider lfoRateSlider;
-    juce::Slider lfoDepthSlider;
-    juce::Slider reverbMixSlider;
-    juce::Slider layer0ResSlider;
-    juce::Slider delayMixSlider;
-    juce::Slider chorusMixSlider;
+    BrowsePage pageBrowse;
+    SynthPage pageSynth;
+    TheoryPage pageTheory;
+    PerformPage pagePerform;
+    FxPage pageFx;
+    ModPage pageMod;
 
-    std::unique_ptr<juce::SliderParameterAttachment> attachMasterVol;
-    std::unique_ptr<juce::SliderParameterAttachment> attachMasterPan;
-    std::unique_ptr<juce::SliderParameterAttachment> attachLayer0Vol;
-    std::unique_ptr<juce::SliderParameterAttachment> attachLayer0Cutoff;
-    std::unique_ptr<juce::SliderParameterAttachment> attachLfoRate;
-    std::unique_ptr<juce::SliderParameterAttachment> attachLfoDepth;
-    std::unique_ptr<juce::SliderParameterAttachment> attachReverbMix;
-    std::unique_ptr<juce::SliderParameterAttachment> attachLayer0Res;
-    std::unique_ptr<juce::SliderParameterAttachment> attachDelayMix;
-    std::unique_ptr<juce::SliderParameterAttachment> attachChorusMix;
+    juce::Component* pages[6] {};
+    int currentPage = 1;
 
-    std::unique_ptr<PerfXyPad> xyPad;
-
-    std::vector<std::pair<juce::Slider*, juce::String>> flexSliders;
+    bool pageFirstShowDone = false;
+    PageFade pageFadePhase = PageFade::idle;
+    int pageFadeAccumMs = 0;
+    uint32_t pageFadeLastCounterMs = 0;
+    int pageFadeFrom = 0;
+    int pageFadeTo = 0;
+    int pageFadeQueued = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MainComponent)
 };
 
-} // namespace wolfsden
+} // namespace wolfsden::ui
+
+using MainComponent = wolfsden::ui::MainComponent;

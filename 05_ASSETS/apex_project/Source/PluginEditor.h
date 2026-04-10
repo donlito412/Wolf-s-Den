@@ -17,7 +17,7 @@ public:
 
 private:
     WolfsDenAudioProcessor& audioProcessor;
-    wolfsden::MainComponent mainComponent;
+    MainComponent mainComponent;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WolfsDenAudioProcessorEditor)
 };

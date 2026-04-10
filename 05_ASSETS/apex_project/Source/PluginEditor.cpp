@@ -7,9 +7,9 @@ WolfsDenAudioProcessorEditor::WolfsDenAudioProcessorEditor(WolfsDenAudioProcesso
     , mainComponent(p)
 {
     addAndMakeVisible(mainComponent);
-    setSize(720, 520);
-    setResizable(true, true);
-    setResizeLimits(480, 400, 2000, 1200);
+    setSize(1200, 780);
+    setResizable(true, false);
+    setResizeLimits(800, 550, 2560, 1600);
 }
 
 void WolfsDenAudioProcessorEditor::paint(juce::Graphics& g)

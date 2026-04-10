@@ -119,6 +119,7 @@ void TheoryEngine::initialise (const juce::File& dbFile)
     seedDatabase();
     loadChordDefinitions();
     loadScaleDefinitions();
+    loadChordSetListings();
     rebuildScaleLookupTable();
 
     databaseReady.store (true, std::memory_order_release);
@@ -1015,6 +1016,37 @@ void TheoryEngine::loadScaleDefinitions()
         sd.intervals  = parseIntervalJson (reinterpret_cast<const char*> (sqlite3_column_text (stmt, 2)));
         sd.modeFamily = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 3));
         scaleDefs.push_back (std::move (sd));
+    }
+    sqlite3_finalize (stmt);
+}
+
+void TheoryEngine::loadChordSetListings()
+{
+    if (!db) return;
+    chordSetList.clear();
+
+    sqlite3_stmt* stmt = nullptr;
+    const int rc = sqlite3_prepare_v2 (db,
+        "SELECT id, name, IFNULL(author,'Wolf Den Factory'), genre, mood, energy, scale_id "
+        "FROM chord_sets ORDER BY id;",
+        -1, &stmt, nullptr);
+
+    if (rc != SQLITE_OK) return;
+
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+        ChordSetListing row;
+        row.id      = sqlite3_column_int (stmt, 0);
+        row.name    = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 1));
+        row.author  = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 2));
+        if (sqlite3_column_type (stmt, 3) != SQLITE_NULL)
+            row.genre = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 3));
+        if (sqlite3_column_type (stmt, 4) != SQLITE_NULL)
+            row.mood = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 4));
+        if (sqlite3_column_type (stmt, 5) != SQLITE_NULL)
+            row.energy = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 5));
+        row.scaleId = sqlite3_column_int (stmt, 6);
+        chordSetList.push_back (std::move (row));
     }
     sqlite3_finalize (stmt);
 }

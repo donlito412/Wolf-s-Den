@@ -184,16 +184,30 @@ bool WolfsDenAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) 
 void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
+    const juce::int64 t0 = juce::Time::getHighResolutionTicks();
 
     drainUiToDspFifo();
+
+    const int n = buffer.getNumSamples();
+    midiKeyboardState.processNextMidiBuffer(midi, 0, n, true);
+
+    for (const auto metadata : midi)
+    {
+        const auto& msg = metadata.getMessage();
+        if (msg.isNoteOn() || msg.isController() || msg.isPitchWheel() || msg.isAftertouch()
+            || msg.isChannelPressure())
+        {
+            midiActivityFlag.store(1, std::memory_order_relaxed);
+            break;
+        }
+    }
 
     for (int i = getTotalNumInputChannels(); i < getTotalNumOutputChannels(); ++i)
         buffer.clear(i, 0, buffer.getNumSamples());
 
     theoryEngine.processMidi(midi);
-    midiPipeline.process(midi, buffer.getNumSamples(), getSampleRate(), getPlayHead(), theoryEngine);
+    midiPipeline.process(midi, n, getSampleRate(), getPlayHead(), theoryEngine);
 
-    const int n = buffer.getNumSamples();
     if (synthLayerBus.getNumChannels() < 8 || synthLayerBus.getNumSamples() < n)
         synthLayerBus.setSize(8, n);
 
@@ -204,6 +218,57 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
                           synthEngine.getLastFxReverbMixAdd(),
                           synthEngine.getLastFxDelayMixAdd(),
                           synthEngine.getLastFxChorusMixAdd());
+
+    const juce::int64 t1 = juce::Time::getHighResolutionTicks();
+    const double sr = getSampleRate();
+    const double blockSecs = (sr > 0.0 && n > 0) ? (double)n / sr : 0.0;
+    if (blockSecs > 0.0)
+    {
+        const double used = juce::Time::highResolutionTicksToSeconds(t1 - t0);
+        const float ratio = (float)juce::jlimit(0.0, 2.0, used / blockSecs);
+        const float c = cpuSmoothed.load(std::memory_order_relaxed);
+        cpuSmoothed.store(c * 0.95f + ratio * 0.05f, std::memory_order_relaxed);
+    }
+
+    if (buffer.getNumChannels() >= 1 && n > 0)
+    {
+        const float* l = buffer.getReadPointer(0);
+        float pl = 0.f;
+        for (int i = 0; i < n; ++i)
+            pl = juce::jmax(pl, std::abs(l[i]));
+        const float oldL = outputPeakL.load(std::memory_order_relaxed);
+        outputPeakL.store(juce::jmax(pl, oldL * 0.92f), std::memory_order_relaxed);
+
+        if (buffer.getNumChannels() > 1)
+        {
+            const float* r = buffer.getReadPointer(1);
+            float pr = 0.f;
+            for (int i = 0; i < n; ++i)
+                pr = juce::jmax(pr, std::abs(r[i]));
+            const float oldR = outputPeakR.load(std::memory_order_relaxed);
+            outputPeakR.store(juce::jmax(pr, oldR * 0.92f), std::memory_order_relaxed);
+        }
+        else
+        {
+            const float oldR = outputPeakR.load(std::memory_order_relaxed);
+            outputPeakR.store(juce::jmax(pl, oldR * 0.92f), std::memory_order_relaxed);
+        }
+    }
+}
+
+void WolfsDenAudioProcessor::setTheoryDetectionMidi() noexcept
+{
+    theoryEngine.setDetectionMode(wolfsden::TheoryEngine::DetectionMode::Midi);
+}
+
+void WolfsDenAudioProcessor::setTheoryDetectionAudio() noexcept
+{
+    theoryEngine.setDetectionMode(wolfsden::TheoryEngine::DetectionMode::Audio);
+}
+
+bool WolfsDenAudioProcessor::consumeMidiActivityFlag() noexcept
+{
+    return midiActivityFlag.exchange(0, std::memory_order_acq_rel) != 0;
 }
 
 void WolfsDenAudioProcessor::setPresetDisplayName(juce::String name)

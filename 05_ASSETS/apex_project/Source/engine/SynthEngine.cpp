@@ -22,6 +22,18 @@ inline float readPtr(std::atomic<float>* ap, float defV = 0.f) noexcept
 
 SynthEngine::SynthEngine() = default;
 
+int SynthEngine::countActiveVoices() const noexcept
+{
+    int n = 0;
+    for (const auto& v : voices)
+    {
+        if (!v.active)
+            continue;
+        ++n;
+    }
+    return n;
+}
+
 void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvts)
 {
     ptrs.masterPitch = apvts.getRawParameterValue("master_pitch");
