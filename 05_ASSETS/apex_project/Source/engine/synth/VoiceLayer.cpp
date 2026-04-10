@@ -7,30 +7,6 @@
 namespace wolfsden
 {
 namespace
-{
-inline double denormTime(float n01, double lo, double hi) noexcept
-{
-    return lo + (double)n01 * (hi - lo);
-}
-
-inline int denormChoice(float n01, int numChoices) noexcept
-{
-    if (numChoices <= 1)
-        return 0;
-    const int maxIdx = numChoices - 1;
-    const double x = (double)std::clamp(n01, 0.f, 1.f) * (double)numChoices - 1e-9;
-    return (int)std::clamp(x, 0.0, (double)maxIdx);
-}
-
-inline double denormCutoffSkewed(float n01) noexcept
-{
-    return 20.0 * std::pow(20000.0 / 20.0, (double)std::clamp(n01, 0.f, 1.f));
-}
-
-inline double denormRes(float n01) noexcept
-{
-    return 0.1 + (double)std::clamp(n01, 0.f, 1.f) * 39.9;
-}
 } // namespace
 
 float VoiceLayer::readP(std::atomic<float>* ap, float defV) noexcept
@@ -114,10 +90,7 @@ void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexc
     const float aR = readP(p.layerAR[layerIndex], 0.2f);
     if (aA != cachedAmpA || aD != cachedAmpD || aS != cachedAmpS || aR != cachedAmpR)
     {
-        ampAdsr.setParameters(denormTime(aA, 0.001, 10.0),
-                              denormTime(aD, 0.001, 10.0),
-                              (double)std::clamp(aS, 0.f, 1.f),
-                              denormTime(aR, 0.001, 15.0));
+        ampAdsr.setParameters(aA, aD, aS, aR);
         cachedAmpA = aA;
         cachedAmpD = aD;
         cachedAmpS = aS;
@@ -130,10 +103,7 @@ void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexc
     const float fR = readP(p.filterAdsrR, 0.15f);
     if (fA != cachedFilA || fD != cachedFilD || fS != cachedFilS || fR != cachedFilR)
     {
-        filtAdsr.setParameters(denormTime(fA, 0.001, 10.0),
-                               denormTime(fD, 0.001, 10.0),
-                               (double)std::clamp(fS, 0.f, 1.f),
-                               denormTime(fR, 0.001, 15.0));
+        filtAdsr.setParameters(fA, fD, fS, fR);
         cachedFilA = fA;
         cachedFilD = fD;
         cachedFilS = fS;
@@ -209,9 +179,8 @@ double VoiceLayer::processGranular(double hz) noexcept
 
 double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept
 {
-    const int nv = juce::jlimit(1, 8, 1 + (int)std::lround(readP(p.layerUnisonVoices[layerIdx], 0.f) * 7.0));
-    const float detN = readP(p.layerUnisonDetune[layerIdx], 20.f / 75.f);
-    const double detMax = denormTime(detN, 5.0, 80.0);
+    const int nv = juce::jlimit(1, 8, (int)std::lround(readP(p.layerUnisonVoices[layerIdx], 1.f)));
+    const double detMax = (double)readP(p.layerUnisonDetune[layerIdx], 25.f);
     const float spN = readP(p.layerUnisonSpread[layerIdx], 0.5f);
     const double spreadMul = 0.25 + 1.75 * (double)std::clamp(spN, 0.f, 1.f);
     const double detNominalHalf = 0.5 * detMax * spreadMul;
@@ -225,8 +194,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
     };
 
     const double inc = hz / sr;
-    const float resN = readP(p.layerRes[layerIdx], 0.3f);
-    const double fmIndex = denormRes(resN) * 0.35;
+    const double fmIndex = (double)readP(p.layerRes[layerIdx], 1.f) * 0.35;
 
     switch (oscType)
     {
@@ -437,10 +405,9 @@ void VoiceLayer::renderAdd(double& outL,
     updateAdsrTargets(layerIndex, p);
 
     // Master pitch (global) + per-layer coarse + mod matrix pitch (vibrato)
-    const double masterPitchSemi = denormTime(readP(p.masterPitch, 0.5f), -48.0, 48.0);
-    const int coarse = (int)std::lround(denormTime(readP(p.layerCoarse[layerIndex], 0.5f), -24.0, 24.0));
-    const float fineN = readP(p.layerFine[layerIndex], 0.5f);
-    const double fineCents = denormTime(fineN, -100.0, 100.0);
+    const double masterPitchSemi = (double)readP(p.masterPitch, 0.f);
+    const int coarse = (int)std::lround(readP(p.layerCoarse[layerIndex], 0.f));
+    const double fineCents = (double)readP(p.layerFine[layerIndex], 0.f);
 
     // Combine integer semitone offsets; fractional mod pitch handled via pow(2, semis/12)
     double hz = dsp::midiNoteToHz(midiNote + coarse + (int)std::lround(masterPitchSemi));
@@ -449,32 +416,32 @@ void VoiceLayer::renderAdd(double& outL,
     if (modMatrixPitchSemi != 0.f)
         hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);
 
-    const int oscType = denormChoice(readP(p.layerOsc[layerIndex], 0.f), 8);
+    const int oscType = (int)readP(p.layerOsc[layerIndex], 0.f);
     const double osc = processOscillator(oscType, hz, layerIndex, p);
 
     const double ampEnv = ampAdsr.process();
     const double filtEnv = filtAdsr.process();
 
-    const int lfoSh = denormChoice(readP(p.lfoShape, 0.f), 6);
+    const int lfoSh = (int)readP(p.lfoShape, 0.f);
     lfoLayer.setShape(juce::jlimit(0, 5, lfoSh));
     const float lfoDep = readP(p.lfoDepth, 0.f);
     const double layerLfo = lfoLayer.tick(0.23 + 0.11 * (double)layerIndex);
 
-    const int lfo2Sh = denormChoice(readP(p.layerLfo2Shape[layerIndex], 0.f), 6);
+    const int lfo2Sh = (int)readP(p.layerLfo2Shape[layerIndex], 0.f);
     lfoLayer2.setShape(juce::jlimit(0, 5, lfo2Sh));
     const float lfo2DepN = readP(p.layerLfo2Depth[layerIndex], 0.f);
-    const double lfo2Hz = 0.01 + (double)readP(p.layerLfo2Rate[layerIndex], 0.5f) * (40.0 - 0.01);
+    const double lfo2Hz = (double)readP(p.layerLfo2Rate[layerIndex], 2.f);
     const double layerLfo2 = lfoLayer2.tick(lfo2Hz);
 
-    const double baseCut = denormCutoffSkewed(readP(p.layerCutoff[layerIndex], 0.5f));
-    const double resCtrl = denormRes(readP(p.layerRes[layerIndex], 0.2f)) + (double)modMatrixResAdd;
+    const double baseCut = (double)readP(p.layerCutoff[layerIndex], 5000.f);
+    const double resCtrl = (double)readP(p.layerRes[layerIndex], 1.f) + (double)modMatrixResAdd;
     const double modSemi = filtEnv * 36.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
                            + (double)modMatrixCutSemi + layerLfo2 * 10.0 * (double)lfo2DepN;
 
-    const int ftype = juce::jlimit(0, 7, denormChoice(readP(p.layerFtype[layerIndex], 0.f), 8));
+    const int ftype = juce::jlimit(0, 7, (int)readP(p.layerFtype[layerIndex], 0.f));
     updateFilterCoeffs(ftype, baseCut, resCtrl, modSemi);
 
-    const bool parallel = denormChoice(readP(p.layerFilterRoute[layerIndex], 0.f), 2) == 1;
+    const bool parallel = (int)readP(p.layerFilterRoute[layerIndex], 0.f) == 1;
 
     double y = 0;
     if (ftype == 6 && combDelaySamples > 0)

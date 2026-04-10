@@ -8,12 +8,6 @@
 namespace wolfsden
 {
 namespace
-{
-inline double denormLfoHz(float n01) noexcept
-{
-    return 0.01 + (double)n01 * (40.0 - 0.01);
-}
-
 inline float readPtr(std::atomic<float>* ap, float defV = 0.f) noexcept
 {
     return ap ? ap->load(std::memory_order_relaxed) : defV;
@@ -322,12 +316,12 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
         lastFxDelayMixAdd = fxDel;
         lastFxChorusMixAdd = fxCho;
 
-        const float lfoShapeN = readPtr(ptrs.lfoShape, 0.f);
-        globalLfo.setShape(juce::jlimit(0, 5, (int)(lfoShapeN * 5.99f)));
+        const int lfoShapeN = (int)readPtr(ptrs.lfoShape, 0.f);
+        globalLfo.setShape(juce::jlimit(0, 5, lfoShapeN));
         const float baseLfoDepth = readPtr(ptrs.lfoDepth, 0.5f);
         const float effLfoDepth = juce::jlimit(0.01f, 1.f, baseLfoDepth + lfoDepthAdd);
         const float depthRatio = juce::jlimit(0.25f, 4.f, effLfoDepth / juce::jmax(0.01f, baseLfoDepth));
-        const double lfoHz = denormLfoHz(readPtr(ptrs.lfoRate, 0.5f)) * (double)lfoRateMul;
+        const double lfoHz = (double)readPtr(ptrs.lfoRate, 2.f) * (double)lfoRateMul;
         const double gLfoRaw = globalLfo.tick(lfoHz);
         const double gLfoToVoice = gLfoRaw * (double)depthRatio;
         lastGlobalLfoForMod = gLfoRaw;
