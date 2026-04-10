@@ -77,7 +77,8 @@ juce::Colour sourceRowColour(S src)
         case S::XY_X:
         case S::XY_Y:        return Theme::accentAlt().withAlpha(0.12f);       // Blue for XY
         case S::Random:      return Theme::error().withAlpha(0.08f);           // Red hint for random
-        default:             return juce::Colours::transparentBlack;
+        case S::Off:
+        case S::NumSources:  return juce::Colours::transparentBlack;
     }
 }
 
