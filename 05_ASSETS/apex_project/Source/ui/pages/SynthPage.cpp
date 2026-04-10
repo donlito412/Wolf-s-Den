@@ -267,7 +267,7 @@ SynthPage::~SynthPage() = default;
 
 juce::String SynthPage::layerKey(const juce::String& tail) const
 {
-    return "layer" + juce::String(activeLayer) + "_" + tail;
+    return "layer_" + juce::String(activeLayer) + "_" + tail;
 }
 
 void SynthPage::clearLayerBindings()
