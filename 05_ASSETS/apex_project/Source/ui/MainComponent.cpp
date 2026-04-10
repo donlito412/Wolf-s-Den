@@ -31,7 +31,7 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
     , pageMod(p)
 {
     laf = std::make_unique<WolfsDenLookAndFeel>();
-    juce::LookAndFeel::setDefaultLookAndFeel(laf.get());
+    setLookAndFeel(laf.get());
 
     addAndMakeVisible(topBar);
 
@@ -71,7 +71,7 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
 MainComponent::~MainComponent()
 {
     stopTimer();
-    juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
+    setLookAndFeel(nullptr);
 }
 
 void MainComponent::showPage(int index)
