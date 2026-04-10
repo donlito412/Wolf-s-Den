@@ -113,6 +113,10 @@ void TopBar::paint(juce::Graphics& g)
             g.drawLine(b.getX() + 4.f, b.getBottom() - 2.f, b.getRight() - 4.f, b.getBottom() - 2.f, 2.f);
         }
     }
+    
+    g.setColour(juce::Colours::red);
+    g.setFont(18.0f);
+    g.drawText("v1.0.1", getLocalBounds().reduced(290, 10).withTrimmedRight(180), juce::Justification::centredRight, false);
 }
 
 void TopBar::resized()
