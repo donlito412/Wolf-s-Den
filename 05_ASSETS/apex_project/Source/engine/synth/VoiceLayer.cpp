@@ -435,7 +435,7 @@ void VoiceLayer::renderAdd(double& outL,
 
     const double baseCut = (double)readP(p.layerCutoff[layerIndex], 5000.f);
     const double resCtrl = (double)readP(p.layerRes[layerIndex], 1.f) + (double)modMatrixResAdd;
-    const double modSemi = filtEnv * 36.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
+    const double modSemi = filtEnv * 0.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
                            + (double)modMatrixCutSemi + layerLfo2 * 10.0 * (double)lfo2DepN;
 
     const int ftype = juce::jlimit(0, 7, (int)readP(p.layerFtype[layerIndex], 0.f));
