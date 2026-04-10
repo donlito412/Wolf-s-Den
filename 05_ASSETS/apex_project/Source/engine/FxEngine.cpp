@@ -619,6 +619,12 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
         outStereo.copyFrom(0, 0, mix, 0, 0, n);
         outStereo.copyFrom(1, 0, mix, 1, 0, n);
     }
+    else if (outStereo.getNumChannels() == 1)
+    {
+        outStereo.copyFrom(0, 0, mix, 0, 0, n);
+        outStereo.addFrom(0, 0, mix, 1, 0, n);
+        outStereo.applyGain(0, 0, n, 0.5f); // Downmix stereo to mono
+    }
     else
     {
         float* d = outStereo.getWritePointer(0);
