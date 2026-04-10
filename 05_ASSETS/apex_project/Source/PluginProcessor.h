@@ -74,6 +74,7 @@ public:
     float getSmoothedCpuLoad() const noexcept { return cpuSmoothed.load(std::memory_order_relaxed); }
     float getOutputPeakL() const noexcept { return outputPeakL.load(std::memory_order_relaxed); }
     float getOutputPeakR() const noexcept { return outputPeakR.load(std::memory_order_relaxed); }
+    bool getIsHostPlaying() const noexcept { return isHostPlaying.load(std::memory_order_relaxed); }
     /** Call from UI timer: returns true if MIDI arrived since last call (one-shot). */
     bool consumeMidiActivityFlag() noexcept;
 
@@ -111,6 +112,7 @@ private:
     std::atomic<float> outputPeakL { 0.f };
     std::atomic<float> outputPeakR { 0.f };
     std::atomic<float> cpuSmoothed { 0.f };
+    std::atomic<bool> isHostPlaying { false };
     std::atomic<int> midiActivityFlag { 0 }; // 1 = flash LED until UI consumes
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WolfsDenAudioProcessor)

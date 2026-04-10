@@ -188,6 +188,12 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
     drainUiToDspFifo();
 
+    bool playingInfo = false;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+            playingInfo = pos->getIsPlaying();
+    isHostPlaying.store(playingInfo, std::memory_order_relaxed);
+
     const int n = buffer.getNumSamples();
     midiKeyboardState.processNextMidiBuffer(midi, 0, n, true);
 

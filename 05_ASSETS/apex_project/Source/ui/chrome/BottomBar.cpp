@@ -78,12 +78,7 @@ void BottomBar::timerCallback()
     const int v = processor.getSynthEngine().countActiveVoices();
     polyLabel.setText("Poly " + juce::String(v) + "/16", juce::dontSendNotification);
 
-    bool playing = false;
-    if (auto* ph = static_cast<juce::AudioProcessor&>(processor).getPlayHead())
-    {
-        if (const auto pos = ph->getPosition())
-            playing = pos->getIsPlaying();
-    }
+    bool playing = processor.getIsHostPlaying();
     syncLabel.setText(playing ? "Sync Live" : "Sync Stopped", juce::dontSendNotification);
 
     repaint();
