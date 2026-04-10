@@ -344,7 +344,7 @@ TheoryPage::TheoryPage(WolfsDenAudioProcessor& proc)
 TheoryPage::~TheoryPage()
 {
     stopTimer();
-    exploreVp.setViewedComponent(nullptr); // disconnect before exploreInner is destroyed
+    exploreVp.setViewedComponent(nullptr, false); // disconnect safely without deleting stack memory
 }
 
 void TheoryPage::timerCallback()
