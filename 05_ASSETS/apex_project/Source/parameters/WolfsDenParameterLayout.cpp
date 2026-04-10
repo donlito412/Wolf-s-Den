@@ -7,7 +7,7 @@ namespace wolfsden
 {
 namespace
 {
-constexpr int kParamVersion = 1;
+constexpr int kParamVersion = 2;
 
 inline juce::ParameterID pid(const juce::String& s)
 {
@@ -28,11 +28,12 @@ void addLayerParams(int layerIndex,
     const juce::String pfx = "layer" + juce::String(layerIndex) + "_";
     const juce::StringArray filterRouteChoices({ "Serial", "Parallel" });
 
+    const float defaultVol = (layerIndex == 0) ? 0.75f : 0.0f;
     out.push_back(std::make_unique<juce::AudioParameterFloat>(
         pid(pfx + "volume"),
         "Layer " + juce::String(layerIndex + 1) + " Volume",
         juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.5f),
-        0.75f));
+        defaultVol));
 
     out.push_back(std::make_unique<juce::AudioParameterFloat>(
         pid(pfx + "pan"),
