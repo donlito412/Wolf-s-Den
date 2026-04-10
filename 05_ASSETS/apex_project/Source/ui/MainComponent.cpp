@@ -156,6 +156,9 @@ void MainComponent::timerCallback()
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Theme::backgroundDark());
+    g.setColour(juce::Colours::red);
+    g.setFont(20.0f);
+    g.drawText("v1.0.1", getLocalBounds().reduced(20), juce::Justification::topRight, false);
 }
 
 void MainComponent::resized()
