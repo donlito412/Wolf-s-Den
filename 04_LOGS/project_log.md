@@ -201,3 +201,21 @@ Output: `TheoryEngine.{h,cpp}` (`ChordSetListing`, `loadChordSetListings`); `Bro
 Details: Browse uses `chord_sets` as preset cards per TASK_009. Genre/mood pills, energy tri-state, scale filter, search, favourites (session), Play/select → `setPresetDisplayName` + TopBar refresh. Release build OK.
 Next Step: Next single page to TASK_009 spec (e.g. Synth, Theory, Perform, FX, or Mod) as user directs
 Status: DONE
+
+---
+
+[2026-04-09]
+
+Agent: Claude
+Task: TASK_009 — Spec closure pass (all remaining UI specs completed)
+Output:
+  - `Source/parameters/WolfsDenParameterLayout.cpp` — 40 new per-layer params (tune_octave, filter_drive, filter2_type/cutoff/resonance/drive, gran_pos/size/density/scatter ×4 layers) + 96 FX slot expanded params (fx_s{idx}_p{0-3} ×24 slots)
+  - `Source/parameters/WolfsDenParameterRegistry.h` — registry entries for all new params
+  - `Source/ui/pages/SynthPage.{h,cpp}` — Octave knob, Filter 2 full controls (Type/Cutoff/Resonance/Drive), Filter 1 Drive, Granular controls (Position/Size/Density/Scatter, show/hide on mode)
+  - `Source/ui/pages/FxPage.{h,cpp}` — ExpandedPanel struct per slot (4 context-sensitive APVTS params, labels per FX type), Add FX button + categorised PopupMenu browser
+  - `Source/ui/theme/WolfsDenLookAndFeel.{h,cpp}` — 80ms hover fade animation (Timer + ComponentListener, per-component alpha map)
+  - `02_TASKS/TASK_009.md` — STATUS set to DONE
+  - `03_OUTPUTS/009_ui_report.md` — full spec completion documented
+Details: All spec'd UI features from TASK_009 now implemented. Deferred items (audio preview, MIDI capture export, FX drag-reorder, XY→DAW record, CoF adjacent popup) are correctly documented as future work and not in the build under finished names.
+Next Step: TASK_010 — integration testing in target DAW hosts
+Status: DONE

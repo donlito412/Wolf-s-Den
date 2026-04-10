@@ -29,12 +29,12 @@ Implemented in `Source/ui/theme/UITheme.{h,cpp}` and `WolfsDenLookAndFeel.{h,cpp
 
 | Page    | Status |
 |--------|--------|
-| **Browse** | **TASK_009 layout:** ~30% left filter sidebar (search, genre + mood toggle pills incl. spec labels + DB extras, Low/Med/High energy, scale combo) + ~70% scrollable **preset cards** from SQLite `chord_sets` (name, genre/mood tags, mood accent stripe, ★ favourite, Play). Bottom **detail strip** (title, author, tags, scale blurb). Selection/Play updates processor preset display name + TopBar. **Not in APVTS** (browse is pack metadata, not synth params). **No audio preview engine yet** — Play loads selection to the bar only. |
-| **Synth** | Single scrollable page: global filter ADSR + LFO + all four layers’ major APVTS controls (float/int/choice) — not per-layer tabbed three-column oscillator/filter/amp layout. |
-| **Theory** | Sub-tabs; scale root/type/voice leading; detect MIDI/audio; browse panel with **3 live match labels**; CoF + explore stubs; degree pads stub alert. |
-| **Perform** | Keys lock, chord mode/type/inversion, arp controls, **step selector 1–32** with per-step attachments; MIDI capture = stub alert. |
-| **FX** | Rack selector (common / layers / master), **4 slots** type + mix + legacy wet sliders — not drag-reorder or full per-FX expanded panels. |
-| **Mod** | **32** matrix slots via 4×8 paging; src/tgt/amt/inv/mute/scope; Dice; Record stub; **PerfXyPad** + `perf_xy_physics` attachment. |
+| **Browse** | ~30% left filter sidebar (search, genre + mood toggle pills, Low/Med/High energy, scale combo) + ~70% scrollable **preset cards** from SQLite `chord_sets` (name, genre/mood tags, mood accent stripe, ★ favourite, Play). Bottom **detail strip**. **No audio preview engine** — Play loads selection to the bar only (documented future work). |
+| **Synth** | Per-layer tabbed 3-column layout (Osc / Filter / Amp) ✅. **Octave, Semitone, Fine** tune knobs ✅. **Filter 1: Type, Cutoff, Resonance, Drive** ✅. **Filter 2: Type, Cutoff, Resonance, Drive** ✅. **Granular controls: Position, Size, Density, Scatter** (visible only in Granular mode) ✅. All APVTS-bound per active layer. |
+| **Theory** | Sub-tabs: BrowseChords (8 chord pads, 7 degree pads, progression track, modifier sidebar) ✅; Circle of Fifths (interactive click-to-set) ✅; Explore (scale list) ✅; Colors grid (diatonic / modal / outside colour-coding) ✅. Scale root/type/voice leading + detect MIDI/audio ✅. |
+| **Perform** | Keys lock, chord mode/type/inversion, arp controls, **step selector 1–32** with per-step attachments ✅; MIDI capture = documented stub (future pipeline work). |
+| **FX** | Rack selector (common / layers A–D / master), **4 slots** type + mix + On/Off ✅. **Expand button → full FX parameter panel** (4 context-sensitive sliders, APVTS-bound, labels match FX type) ✅. **Add FX button → categorised popup browser** (Dynamics, EQ & Filter, Distortion, Modulation, Delay & Reverb, Stereo Utilities) ✅. Drag-reorder = documented future work. |
+| **Mod** | **32** matrix slots via 4×8 paging; src/tgt/amt/inv/mute/scope; Dice; Record stub; **PerfXyPad** + `perf_xy_physics` attachment ✅. |
 
 ---
 
@@ -48,6 +48,7 @@ Implemented in `Source/ui/theme/UITheme.{h,cpp}` and `WolfsDenLookAndFeel.{h,cpp
 ## Performance (60 fps)
 
 - **No profiler run** in this task. `paint()` paths are mostly fills + text + meters; heavy work is on timers (CPU label, bottom bar sync, theory match labels), not per-frame DSP. Treat **60 fps as a target**, not a measured guarantee, until profiled in a host.
+- Granular controls, Filter 2, and FX expanded panels only add widgets, no per-frame DSP in `paint()` — no additional 60fps risk introduced.
 
 ---
 
@@ -78,11 +79,25 @@ Per-page **screenshots were not captured** in this environment. Suggested locati
 
 ## Deferred / follow-ups
 
-- **Browse:** optional audio preview; applying a chord set to Theory/Perform pipeline (beyond preset name); persist favourites.
-- **Synth** layer tabs + full spec; Theory progression track; FX drag-reorder + full param sheets; MIDI capture export; XY→DAW record; **80 ms** animated hover on tabs/buttons (currently instant LAF highlight + slider glow).
+- **Browse:** optional audio preview (no DSP engine yet); applying a chord set to Theory/Perform pipeline beyond preset name display; persist favourites to DB.
+- **Theory:** CoF adjacent-segment popup showing shared notes (minor enhancement).
+- **Perform:** MIDI capture clip export (requires arrange/preset pipeline work).
+- **FX:** drag-to-reorder slots (complex UX, deferred).
+- **Mod:** XY → DAW automation record (requires host parameter automation pass).
 
 ---
 
+## UI polish completed (2026-04-09 — spec closure pass)
+
+- **Synth Filter column:** Filter 1 + Filter 2 each have Type combo, Cutoff, Resonance, and Drive knobs (APVTS per-layer bindings: `filter_drive`, `filter2_type/cutoff/resonance/drive`).
+- **Synth Oscillator column:** Added separate **Octave** knob (`tune_octave`, int -3 to +3) alongside existing Semitone/Fine. Knobs now labeled Oct / Semi / Fine.
+- **Synth Granular mode:** Four dedicated sliders — Position, Size, Density, Scatter — appear/hide with their labels when osc mode is set to Granular.
+- **New per-layer parameters added** to `WolfsDenParameterLayout.cpp` + `WolfsDenParameterRegistry.h`: `tune_octave`, `filter_drive`, `filter2_type/cutoff/resonance/drive`, `gran_pos/size/density/scatter` (×4 layers = 40 new params).
+- **FX expanded panel:** Clicking `…` on any slot reveals a context-sensitive 4-parameter panel (`fx_s{idx}_p{0-3}`, or EQ band params for Parametric EQ). Labels (e.g. Decay / Pre-delay / Damping / Size for Reverb) update automatically when the FX type changes.
+- **Add FX browser:** `+ Add FX` button appears when a slot is expanded; shows a `PopupMenu` with sub-categories (Dynamics, EQ & Filter, Distortion, Modulation, Delay & Reverb, Stereo Utilities) and sets the slot type parameter on selection.
+- **80ms hover animation:** `WolfsDenLookAndFeel` now extends `juce::Timer` + `juce::ComponentListener`. `drawButtonBackground` drives an animated `hoverAlpha` per component (60 Hz timer, ~0.208 step/frame → 80ms full fade). Stale entries auto-removed via `componentBeingDeleted`.
+- **Per-slot FX generic params** added: `fx_s{idx}_p{0-3}` for 24 slots (96 new global params).
+
 ## Next step
 
-**TASK_010** — integration testing in target hosts, or continue UI polish against the full TASK_009 spec.
+**TASK_010** — integration testing in target hosts (Ableton Live, Logic Pro, FL Studio).

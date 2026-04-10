@@ -131,12 +131,26 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     }
 
     addAndMakeVisible(wavePreview);
-    granularHint.setText("Granular: position / size / density / scatter",
-                         juce::dontSendNotification);
-    granularHint.setFont(Theme::fontLabel());
-    granularHint.setColour(juce::Label::textColourId, Theme::textSecondary());
-    granularHint.setJustificationType(juce::Justification::topLeft);
-    addAndMakeVisible(granularHint);
+    granularHint.setText("",  juce::dontSendNotification); // hidden – replaced by real controls below
+    granularHint.setVisible(false);
+
+    // Granular controls
+    static const char* kGranLabels[4] = { "Position", "Size", "Density", "Scatter" };
+    juce::Slider* granSliders[4] = { &granPos, &granSize, &granDensity, &granScatter };
+    juce::Label*  granLabels[4]  = { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter };
+    for (int i = 0; i < 4; ++i)
+    {
+        styleHSlider(*granSliders[(size_t)i]);
+        granSliders[(size_t)i]->setVisible(false);
+        addAndMakeVisible(*granSliders[(size_t)i]);
+
+        granLabels[(size_t)i]->setText(kGranLabels[(size_t)i], juce::dontSendNotification);
+        granLabels[(size_t)i]->setFont(Theme::fontLabel());
+        granLabels[(size_t)i]->setColour(juce::Label::textColourId, Theme::textSecondary());
+        granLabels[(size_t)i]->setJustificationType(juce::Justification::centredLeft);
+        granLabels[(size_t)i]->setVisible(false);
+        addAndMakeVisible(*granLabels[(size_t)i]);
+    }
 
     auto prep = [](juce::Label& L, const juce::String& t, juce::Colour col) {
         L.setText(t, juce::dontSendNotification);
@@ -144,28 +158,42 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
         L.setColour(juce::Label::textColourId, col);
         L.setJustificationType(juce::Justification::centredLeft);
     };
-    prep(lblFilter1, "Filter 1", Theme::textPrimary());
-    prep(lblFilter2, "Filter 2", Theme::textPrimary());
-    prep(lblFilterTopology,
-         "Dual filter — serial / parallel routing per layer",
-         Theme::textSecondary());
-    prep(lblDrivePlanGap, "",
-         Theme::textDisabled());
-    prep(lblLfoPlanGap, "",
-         Theme::textDisabled());
-    for (auto* L : { &lblFilter1, &lblFilter2, &lblFilterTopology, &lblDrivePlanGap, &lblLfoPlanGap })
+    prep(lblFilter1,    "Filter 1",  Theme::textPrimary());
+    prep(lblFilter2Header, "Filter 2", Theme::textPrimary());
+    prep(lblFilter2,    "",          Theme::textDisabled()); // kept for compat, hidden
+    prep(lblFilterTopology, "Routing", Theme::textSecondary());
+    prep(lblDrivePlanGap, "", Theme::textDisabled());
+    prep(lblLfoPlanGap,   "", Theme::textDisabled());
+    lblFilter2.setVisible(false);
+    for (auto* L : { &lblFilter1, &lblFilter2Header, &lblFilterTopology, &lblDrivePlanGap, &lblLfoPlanGap })
         addAndMakeVisible(*L);
 
+    // OSC tune knobs — Octave / Semitone / Fine
+    styleKnob(oscOctave);  oscOctave.setRange(-3, 3, 1);
     styleKnob(oscCoarse);
     styleKnob(oscFine);
+    addAndMakeVisible(oscOctave);
     addAndMakeVisible(oscCoarse);
     addAndMakeVisible(oscFine);
 
+    // Filter 1
     addAndMakeVisible(filterType);
     styleKnob(fCut);
     styleKnob(fRes);
+    styleKnob(fDrive);
     addAndMakeVisible(fCut);
     addAndMakeVisible(fRes);
+    addAndMakeVisible(fDrive);
+
+    // Filter 2 (lblFilter2Header already added via label loop above)
+    addAndMakeVisible(filter2Type);
+    styleKnob(fCut2);
+    styleKnob(fRes2);
+    styleKnob(fDrive2);
+    addAndMakeVisible(fCut2);
+    addAndMakeVisible(fRes2);
+    addAndMakeVisible(fDrive2);
+
     addAndMakeVisible(filterRoute);
 
     styleHSlider(filEnvA);
@@ -247,12 +275,26 @@ void SynthPage::clearLayerBindings()
 void SynthPage::bindLayer(int layerIndex)
 {
     juce::ignoreUnused(layerIndex);
-    addS(apvts, layerKey("tune_coarse"), oscCoarse, layerSAtt);
-    addS(apvts, layerKey("tune_fine"), oscFine, layerSAtt);
-    addC(apvts, layerKey("filter_type"), filterType, layerCAtt);
-    addS(apvts, layerKey("filter_cutoff"), fCut, layerSAtt);
-    addS(apvts, layerKey("filter_resonance"), fRes, layerSAtt);
+    // OSC
+    addS(apvts, layerKey("tune_coarse"),  oscCoarse, layerSAtt);
+    addS(apvts, layerKey("tune_fine"),    oscFine,   layerSAtt);
+    addS(apvts, layerKey("tune_octave"),  oscOctave, layerSAtt);
+    // Filter 1
+    addC(apvts, layerKey("filter_type"),      filterType, layerCAtt);
+    addS(apvts, layerKey("filter_cutoff"),    fCut,   layerSAtt);
+    addS(apvts, layerKey("filter_resonance"), fRes,   layerSAtt);
+    addS(apvts, layerKey("filter_drive"),     fDrive, layerSAtt);
+    // Filter 2
+    addC(apvts, layerKey("filter2_type"),      filter2Type, layerCAtt);
+    addS(apvts, layerKey("filter2_cutoff"),    fCut2,   layerSAtt);
+    addS(apvts, layerKey("filter2_resonance"), fRes2,   layerSAtt);
+    addS(apvts, layerKey("filter2_drive"),     fDrive2, layerSAtt);
     addC(apvts, layerKey("filter_routing"), filterRoute, layerCAtt);
+    // Granular
+    addS(apvts, layerKey("gran_pos"),     granPos,     layerSAtt);
+    addS(apvts, layerKey("gran_size"),    granSize,    layerSAtt);
+    addS(apvts, layerKey("gran_density"), granDensity, layerSAtt);
+    addS(apvts, layerKey("gran_scatter"), granScatter, layerSAtt);
 
     addS(apvts, layerKey("amp_attack"), ampA, layerSAtt);
     addS(apvts, layerKey("amp_decay"), ampD, layerSAtt);
@@ -299,9 +341,14 @@ void SynthPage::syncOscButtons()
                                         on ? Theme::accentPrimary().withAlpha(0.35f) : Theme::panelSurface());
     }
 
-    granularHint.setVisible(idx == 5); // Granular
+    const bool isGranular = (idx == 5);
+    for (auto* s : { &granPos, &granSize, &granDensity, &granScatter })
+        s->setVisible(isGranular);
+    for (auto* L : { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter })
+        L->setVisible(isGranular);
     filEnvShape.repaint();
     ampShape.repaint();
+    resized();
 }
 
 void SynthPage::timerCallback()
@@ -324,9 +371,29 @@ void SynthPage::paint(juce::Graphics& g)
         g.setFont(Theme::fontPanelHeader());
         g.drawText(title, zone.withHeight(18).reduced(4, 0), juce::Justification::centredLeft);
     };
-    drawColTitle(zoneOsc, "OSCILLATOR");
+    drawColTitle(zoneOsc,  "OSCILLATOR");
     drawColTitle(zoneFilt, "FILTER");
-    drawColTitle(zoneAmp, "AMPLIFIER");
+    drawColTitle(zoneAmp,  "AMPLIFIER");
+
+    // Granular region indicator
+    if (!zoneGranular.isEmpty() && granPos.isVisible())
+    {
+        g.setColour(Theme::accentAlt().withAlpha(0.08f));
+        g.fillRoundedRectangle(zoneGranular.toFloat().reduced(2.f), 4.f);
+    }
+
+    // Knob labels for tune row
+    if (!zoneOsc.isEmpty())
+    {
+        const auto kbRow = oscOctave.getBounds().withTop(oscOctave.getBottom() - 12);
+        const auto tuneArea = juce::Rectangle<int>(zoneOsc.getX(), kbRow.getY(), zoneOsc.getWidth(), 12);
+        const int kw3 = (tuneArea.getWidth() - 4) / 3;
+        g.setColour(Theme::textDisabled());
+        g.setFont(Theme::fontLabel());
+        g.drawText("Oct",  tuneArea.withWidth(kw3), juce::Justification::centred);
+        g.drawText("Semi", tuneArea.withWidth(kw3).withX(tuneArea.getX() + kw3 + 2), juce::Justification::centred);
+        g.drawText("Fine", tuneArea.withWidth(kw3).withX(tuneArea.getX() + 2 * kw3 + 4), juce::Justification::centred);
+    }
 
     for (int i = 0; i < 4; ++i)
     {
@@ -422,37 +489,82 @@ void SynthPage::resized()
             oscModeBtn[(size_t)(row * 4 + c)]
                 .setBounds(x0 + c * btnW + 1, y + row * btnH, btnW - 2, btnH - 2);
     y += btnH * 2 + 8;
-    const int knobColH = 76;
-    const int belowWave = (granularHint.isVisible() ? 46 : 8) + knobColH + 8;
-    const int waveH = juce::jlimit(48, 96, juce::jmax(48, o.getBottom() - y - belowWave));
+
+    // Waveform preview
+    const bool isGranular = granPos.isVisible();
+    const int granControlsH = isGranular ? (4 * 22 + 4) : 0; // 4 sliders with labels
+    const int tuneKnobH = 66;
+    const int waveH = juce::jlimit(40, 80, juce::jmax(40, o.getBottom() - y - granControlsH - tuneKnobH - 8));
     wavePreview.setBounds(x0, y, cw, waveH);
     y += wavePreview.getHeight() + 6;
-    granularHint.setBounds(x0, y, cw, granularHint.isVisible() ? 40 : 4);
-    y += granularHint.getHeight() + 6;
-    const int kw = (cw - 8) / 2;
-    const int knobH = juce::jmax(knobColH, o.getBottom() - y);
-    oscCoarse.setBounds(x0, y, kw, knobH);
-    oscFine.setBounds(x0 + kw + 8, y, kw, knobH);
+
+    // Granular controls — only visible in Granular mode
+    zoneGranular = juce::Rectangle<int>(x0, y, cw, granControlsH);
+    if (isGranular)
+    {
+        juce::Slider* gs[4] = { &granPos, &granSize, &granDensity, &granScatter };
+        juce::Label*  gl[4] = { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter };
+        for (int i = 0; i < 4; ++i)
+        {
+            gl[(size_t)i]->setBounds(x0, y, cw, 12);
+            y += 12;
+            gs[(size_t)i]->setBounds(x0, y, cw, 18);
+            y += 20;
+        }
+    }
+    else
+    {
+        y += granControlsH;
+    }
+
+    // Tune: Octave / Semitone / Fine — three equal knobs
+    const int kw3 = (cw - 4) / 3;
+    const int knobH = juce::jmax(tuneKnobH, o.getBottom() - y);
+    oscOctave.setBounds(x0,           y, kw3, knobH);
+    oscCoarse.setBounds(x0 + kw3 + 2, y, kw3, knobH);
+    oscFine.setBounds  (x0 + 2 * kw3 + 4, y, kw3, knobH);
 
     auto f = colFilt.reduced(4, 0);
     f.removeFromTop(kSecTitle);
     y = f.getY();
     const int fx0 = f.getX();
     const int fcw = f.getWidth();
+
+    // Filter 1 header
     lblFilter1.setBounds(fx0, y, fcw, 16);
     y += 18;
     filterType.setBounds(fx0, y, fcw, 24);
     y += 28;
-    const int fk = (fcw - 6) / 2;
-    fCut.setBounds(fx0, y, fk, 68);
-    fRes.setBounds(fx0 + fk + 6, y, fk, 68);
-    y += 74;
-    lblFilter2.setBounds(fx0, y, fcw, 16);
+    // Filter 1: Cutoff / Resonance / Drive knobs
+    {
+        const int fk = (fcw - 4) / 3;
+        fCut.setBounds(fx0,          y, fk, 64);
+        fRes.setBounds(fx0 + fk + 2, y, fk, 64);
+        fDrive.setBounds(fx0 + 2 * fk + 4, y, fk, 64);
+    }
+    y += 68;
+
+    // Filter 2 header
+    lblFilter2Header.setBounds(fx0, y, fcw, 16);
     y += 18;
-    lblFilterTopology.setBounds(fx0, y, fcw, 32);
-    y += 36;
+    filter2Type.setBounds(fx0, y, fcw, 24);
+    y += 28;
+    // Filter 2: Cutoff / Resonance / Drive knobs
+    {
+        const int fk = (fcw - 4) / 3;
+        fCut2.setBounds(fx0,          y, fk, 64);
+        fRes2.setBounds(fx0 + fk + 2, y, fk, 64);
+        fDrive2.setBounds(fx0 + 2 * fk + 4, y, fk, 64);
+    }
+    y += 68;
+
+    // Routing
+    lblFilterTopology.setBounds(fx0, y, fcw, 14);
+    y += 16;
     filterRoute.setBounds(fx0, y, fcw, 24);
-    y += 30;
+    y += 28;
+
+    // Filter envelope
     const int feH = 18;
     filEnvA.setBounds(fx0, y, fcw, feH);
     y += feH + 2;
@@ -462,9 +574,8 @@ void SynthPage::resized()
     y += feH + 2;
     filEnvR.setBounds(fx0, y, fcw, feH);
     y += feH + 4;
-    filEnvShape.setBounds(fx0, y, fcw, juce::jmin(52, f.getBottom() - y - 40));
-    y += filEnvShape.getHeight() + 6;
-    lblDrivePlanGap.setBounds(fx0, y, fcw, juce::jmax(20, f.getBottom() - y));
+    filEnvShape.setBounds(fx0, y, fcw, juce::jmin(52, f.getBottom() - y - 4));
+    lblDrivePlanGap.setBounds(fx0, y, 0, 0); // hidden, kept to avoid null ref
 
     auto a = colAmp.reduced(4, 0);
     a.removeFromTop(kSecTitle);

@@ -74,12 +74,27 @@ private:
     WaveformPreview wavePreview;
     juce::Label granularHint;
 
+    // OSC column
+    juce::Slider oscOctave;   // new: -3 to +3 octave
     juce::Slider oscCoarse;
     juce::Slider oscFine;
 
+    // Granular-specific controls (visible only when osc mode == Granular)
+    juce::Slider granPos, granSize, granDensity, granScatter;
+    juce::Label  lblGranPos, lblGranSize, lblGranDensity, lblGranScatter;
+    juce::Rectangle<int> zoneGranular;
+
+    // Filter 1
     juce::ComboBox filterType;
     juce::Slider fCut;
     juce::Slider fRes;
+    juce::Slider fDrive;   // new
+
+    // Filter 2
+    juce::Label    lblFilter2Header;
+    juce::ComboBox filter2Type;
+    juce::Slider   fCut2, fRes2, fDrive2;
+
     juce::ComboBox filterRoute;
 
     juce::Slider filEnvA, filEnvD, filEnvS, filEnvR;

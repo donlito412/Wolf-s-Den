@@ -143,6 +143,69 @@ void addLayerParams(int layerIndex,
         "Layer " + juce::String(layerIndex + 1) + " Unison Spread",
         juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.5f),
         0.5f));
+
+    // --- Tune octave (separate from coarse semitone) ---
+    out.push_back(std::make_unique<juce::AudioParameterInt>(
+        pid(pfx + "tune_octave"),
+        "Layer " + juce::String(layerIndex + 1) + " Tune Octave",
+        -3, 3, 0));
+
+    // --- Filter 1 Drive ---
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "filter_drive"),
+        "Layer " + juce::String(layerIndex + 1) + " Filter Drive",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.5f),
+        0.f));
+
+    // --- Filter 2 ---
+    out.push_back(std::make_unique<juce::AudioParameterChoice>(
+        pid(pfx + "filter2_type"),
+        "Layer " + juce::String(layerIndex + 1) + " Filter 2 Type",
+        filterTypeChoices,
+        0));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "filter2_cutoff"),
+        "Layer " + juce::String(layerIndex + 1) + " Filter 2 Cutoff",
+        logCutoffRange(),
+        20000.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "filter2_resonance"),
+        "Layer " + juce::String(layerIndex + 1) + " Filter 2 Resonance",
+        juce::NormalisableRange<float>(0.1f, 40.f, 0.f, 0.3f),
+        1.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "filter2_drive"),
+        "Layer " + juce::String(layerIndex + 1) + " Filter 2 Drive",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.5f),
+        0.f));
+
+    // --- Granular synthesis controls ---
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "gran_pos"),
+        "Layer " + juce::String(layerIndex + 1) + " Granular Position",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 1.f),
+        0.5f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "gran_size"),
+        "Layer " + juce::String(layerIndex + 1) + " Granular Size",
+        juce::NormalisableRange<float>(0.01f, 1.f, 0.f, 0.5f),
+        0.1f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "gran_density"),
+        "Layer " + juce::String(layerIndex + 1) + " Granular Density",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 1.f),
+        0.5f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "gran_scatter"),
+        "Layer " + juce::String(layerIndex + 1) + " Granular Scatter",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 1.f),
+        0.f));
 }
 } // namespace
 
@@ -398,6 +461,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
                 "FX slot " + juce::String(si + 1) + eqBandSuffix[(size_t)b],
                 juce::NormalisableRange<float>(-18.f, 18.f, 0.01f, 0.5f),
                 0.f));
+        }
+    }
+
+    // --- Generic per-slot FX expanded params (4 per slot × 24 slots) ---
+    // Labels are set dynamically by FxPage based on selected FX type.
+    for (int si = 0; si < 24; ++si)
+    {
+        const juce::String idx = juce::String(si).paddedLeft('0', 2);
+        const juce::String pfx = "fx_s" + idx;
+        for (int p = 0; p < 4; ++p)
+        {
+            params.push_back(std::make_unique<juce::AudioParameterFloat>(
+                pid(pfx + "_p" + juce::String(p)),
+                "FX slot " + juce::String(si + 1) + " Param " + juce::String((char)('A' + p)),
+                juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.5f),
+                0.5f));
         }
     }
 

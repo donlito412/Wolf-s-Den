@@ -3,12 +3,18 @@
 #include "UITheme.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <map>
 
 namespace wolfsden::ui
 {
 
-/** Custom-painted controls per TASK_009 (no stock OS chrome). */
-class WolfsDenLookAndFeel : public juce::LookAndFeel_V4
+/**
+ * Custom-painted controls per TASK_009 (no stock OS chrome).
+ * Implements 80ms hover fade animation for buttons and tabs via a 60 Hz timer.
+ */
+class WolfsDenLookAndFeel : public juce::LookAndFeel_V4,
+                            private juce::Timer,
+                            private juce::ComponentListener
 {
 public:
     WolfsDenLookAndFeel();
@@ -55,6 +61,20 @@ public:
                       juce::ComboBox& box) override;
 
     juce::Font getLabelFont(juce::Label& label) override;
+
+private:
+    /** Per-component hover state for the 80ms fade animation. */
+    struct HoverState { float alpha = 0.f; bool hovering = false; };
+    std::map<juce::Component*, HoverState> hoverMap;
+
+    /** Query (and lazily register) hover alpha for a button/component. */
+    float getHoverAlpha(juce::Component& c, bool hovering);
+
+    // juce::Timer — advances all hover alphas toward their target at 60 Hz
+    void timerCallback() override;
+
+    // juce::ComponentListener — removes stale entries when a component is deleted
+    void componentBeingDeleted(juce::Component& c) override;
 };
 
 } // namespace wolfsden::ui

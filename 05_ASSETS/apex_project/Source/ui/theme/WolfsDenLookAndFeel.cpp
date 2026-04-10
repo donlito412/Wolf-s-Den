@@ -119,19 +119,29 @@ void WolfsDenLookAndFeel::drawButtonBackground(juce::Graphics& g,
                                                bool highlighted,
                                                bool down)
 {
-    auto r = button.getLocalBounds().toFloat().reduced(1.f);
-    juce::Colour fill = button.getToggleState() ? Theme::accentPrimary().withAlpha(0.45f) : Theme::panelSurface();
-    if (down)
-        fill = fill.brighter(0.08f);
-    else if (highlighted)
-        fill = fill.brighter(0.04f);
-    g.setColour(fill);
-    g.fillRoundedRectangle(r, (float)juce::jmin(10, button.getHeight() / 2));
+    const float hoverA = getHoverAlpha(button, highlighted);
 
-    if (button.getToggleState() || highlighted)
+    auto r = button.getLocalBounds().toFloat().reduced(1.f);
+    const float cornerR = (float)juce::jmin(10, button.getHeight() / 2);
+
+    // Base fill — blend from panel surface toward highlight as hoverA rises
+    juce::Colour fill = button.getToggleState()
+                        ? Theme::accentPrimary().withAlpha(0.45f)
+                        : Theme::panelSurface();
+    if (down)
+        fill = fill.brighter(0.12f);
+    else if (hoverA > 0.f)
+        fill = fill.brighter(0.08f * hoverA);
+
+    g.setColour(fill);
+    g.fillRoundedRectangle(r, cornerR);
+
+    // Glow outline — fully animated over 80ms
+    const float glowStrength = button.getToggleState() ? 1.f : hoverA;
+    if (glowStrength > 0.02f)
     {
-        g.setColour(Theme::accentHot().withAlpha(0.35f));
-        g.drawRoundedRectangle(r.reduced(0.5f), (float)juce::jmin(10, button.getHeight() / 2), 1.f);
+        g.setColour(Theme::accentHot().withAlpha(0.35f * glowStrength));
+        g.drawRoundedRectangle(r.reduced(0.5f), cornerR, 1.f);
     }
 }
 
@@ -201,6 +211,63 @@ juce::Font WolfsDenLookAndFeel::getLabelFont(juce::Label& label)
     if (label.getFont().getHeight() > 0.1f)
         return label.getFont();
     return Theme::fontLabel();
+}
+
+// =============================================================================
+// 80ms hover animation
+// =============================================================================
+
+float WolfsDenLookAndFeel::getHoverAlpha(juce::Component& c, bool hovering)
+{
+    auto it = hoverMap.find(&c);
+    if (it == hoverMap.end())
+    {
+        // First time seen — register a listener so we can clean up on destruction
+        c.addComponentListener(this);
+        hoverMap[&c] = { hovering ? 1.f : 0.f, hovering };
+        return hoverMap[&c].alpha;
+    }
+
+    auto& hs = it->second;
+    if (hs.hovering != hovering)
+    {
+        hs.hovering = hovering;
+        if (!isTimerRunning())
+            startTimerHz(60);
+    }
+    return hs.alpha;
+}
+
+void WolfsDenLookAndFeel::timerCallback()
+{
+    // ~80ms at 60fps  →  step ≈ 0.208 per frame
+    static constexpr float kStep = 1.f / (0.080f * 60.f);
+
+    bool anyAnimating = false;
+    for (auto& [comp, hs] : hoverMap)
+    {
+        const float target = hs.hovering ? 1.f : 0.f;
+        const float delta  = target - hs.alpha;
+        if (std::abs(delta) > 0.004f)
+        {
+            hs.alpha += (delta > 0.f ? kStep : -kStep);
+            hs.alpha  = juce::jlimit(0.f, 1.f, hs.alpha);
+            comp->repaint();
+            anyAnimating = true;
+        }
+        else
+        {
+            hs.alpha = target;
+        }
+    }
+    if (!anyAnimating)
+        stopTimer();
+}
+
+void WolfsDenLookAndFeel::componentBeingDeleted(juce::Component& c)
+{
+    hoverMap.erase(&c);
+    c.removeComponentListener(this);
 }
 
 } // namespace wolfsden::ui
