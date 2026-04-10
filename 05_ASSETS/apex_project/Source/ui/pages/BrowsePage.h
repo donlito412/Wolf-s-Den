@@ -55,8 +55,8 @@ private:
     WolfsDenAudioProcessor& processor;
 
     juce::TextEditor searchBox;
-    juce::Viewport sidebarViewport;
     juce::Component sidebarInner;
+    juce::Viewport sidebarViewport;
     juce::Label labelGenre { {}, "Genre" };
     juce::Label labelMood { {}, "Mood" };
     juce::Label labelEnergy { {}, "Energy" };
@@ -69,8 +69,8 @@ private:
     juce::TextButton energyHigh { "High" };
     juce::ComboBox scaleFilter;
 
-    juce::Viewport cardViewport;
     juce::Component cardHolder;
+    juce::Viewport cardViewport;
 
     int energyFilter = -1;
     int selectedChordSetId = -1;
