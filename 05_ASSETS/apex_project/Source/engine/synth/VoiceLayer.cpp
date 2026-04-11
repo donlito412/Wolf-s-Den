@@ -6,6 +6,31 @@
 
 namespace wolfsden
 {
+namespace
+{
+/** APVTS raw for AudioParameterChoice is normalized 0..1 — never cast to int directly. */
+inline int readChoiceIndex(std::atomic<float>* ap, int numItems, int defIdx) noexcept
+{
+    if (!ap || numItems < 2)
+        return defIdx;
+    const float n = ap->load(std::memory_order_relaxed);
+    if (n > 1.0001f)
+        return juce::jlimit(0, numItems - 1, (int)std::lround(n));
+    return juce::jlimit(0, numItems - 1, (int)(n * (float)numItems * 0.9999f));
+}
+
+/** APVTS raw for AudioParameterInt is normalized from min..max. */
+inline int readIntFromNorm(std::atomic<float>* ap, int minV, int maxV, int defV) noexcept
+{
+    if (!ap || maxV < minV)
+        return defV;
+    const float n = ap->load(std::memory_order_relaxed);
+    if (n > 1.0001f)
+        return juce::jlimit(minV, maxV, (int)std::lround(n));
+    const int span = maxV - minV;
+    return juce::jlimit(minV, maxV, minV + (int)std::lround(n * (float)span));
+}
+} // namespace
 
 float VoiceLayer::readP(std::atomic<float>* ap, float defV) noexcept
 {
@@ -22,7 +47,8 @@ void VoiceLayer::prepare(double sampleRate,
                          const double* wavetable,
                          int wavetableSize,
                          const double* granularSource,
-                         int granularSize) noexcept
+                         int granularSize,
+                         int maxBlockSize) noexcept
 {
     sr = sampleRate;
     wtData = wavetable;
@@ -35,6 +61,7 @@ void VoiceLayer::prepare(double sampleRate,
     lfoLayer.setShape(0);
     lfoLayer2.setSampleRate(sr);
     lfoLayer2.setShape(0);
+    samplePlayer.prepare(sampleRate, maxBlockSize);
 }
 
 void VoiceLayer::reset() noexcept
@@ -72,12 +99,21 @@ void VoiceLayer::noteOn(int midiNote, float velocity) noexcept
     uniTri.fill(0.0);
     ampAdsr.noteOn();
     filtAdsr.noteOn();
+
+    // Sample: promote pending→cached before testing (otherwise startNote never runs → silence forever)
+    samplePlayer.syncPendingToCache();
+    if (samplePlayer.hasReadableSource())
+    {
+        const float pitchRatio = std::pow(2.f, (float)(midiNote - samplePlayer.rootNote()) / 12.f);
+        samplePlayer.startNote(pitchRatio, velocity);
+    }
 }
 
 void VoiceLayer::noteOff() noexcept
 {
     ampAdsr.noteOff();
     filtAdsr.noteOff();
+    samplePlayer.stopNote();
 }
 
 void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexcept
@@ -177,7 +213,7 @@ double VoiceLayer::processGranular(double hz) noexcept
 
 double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept
 {
-    const int nv = juce::jlimit(1, 8, (int)std::lround(readP(p.layerUnisonVoices[layerIdx], 1.f)));
+    const int nv = readIntFromNorm(p.layerUnisonVoices[layerIdx], 1, 8, 1);
     const double detMax = (double)readP(p.layerUnisonDetune[layerIdx], 25.f);
     const float spN = readP(p.layerUnisonSpread[layerIdx], 0.5f);
     const double spreadMul = 0.25 + 1.75 * (double)std::clamp(spN, 0.f, 1.f);
@@ -304,12 +340,11 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             const double mod = fmIndex * std::sin(dsp::twoPi * phaseFmMod);
             return std::sin(dsp::twoPi * phaseFmCar + mod);
         }
-        case 7: // sample (octave-up table playback)
+        case 7: // sample — real WAV playback via WDSamplePlayer
         {
-            phaseSmpl += inc * 2.0;
-            if (phaseSmpl >= 1.0)
-                phaseSmpl -= 1.0;
-            return readWavetable(phaseSmpl);
+            if (samplePlayer.hasReadableSource() && samplePlayer.isActive())
+                return (double) samplePlayer.nextSampleMono();
+            return 0.0;
         }
         default:
             return 0.0;
@@ -404,7 +439,7 @@ void VoiceLayer::renderAdd(double& outL,
 
     // Master pitch (global) + per-layer coarse + mod matrix pitch (vibrato)
     const double masterPitchSemi = (double)readP(p.masterPitch, 0.f);
-    const int coarse = (int)std::lround(readP(p.layerCoarse[layerIndex], 0.f));
+    const int coarse = readIntFromNorm(p.layerCoarse[layerIndex], -24, 24, 0);
     const double fineCents = (double)readP(p.layerFine[layerIndex], 0.f);
 
     // Combine integer semitone offsets; fractional mod pitch handled via pow(2, semis/12)
@@ -414,18 +449,18 @@ void VoiceLayer::renderAdd(double& outL,
     if (modMatrixPitchSemi != 0.f)
         hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);
 
-    const int oscType = (int)readP(p.layerOsc[layerIndex], 0.f);
+    const int oscType = readChoiceIndex(p.layerOsc[layerIndex], 8, 0);
     const double osc = processOscillator(oscType, hz, layerIndex, p);
 
     const double ampEnv = ampAdsr.process();
     const double filtEnv = filtAdsr.process();
 
-    const int lfoSh = (int)readP(p.lfoShape, 0.f);
+    const int lfoSh = readChoiceIndex(p.lfoShape, 6, 0);
     lfoLayer.setShape(juce::jlimit(0, 5, lfoSh));
     const float lfoDep = readP(p.lfoDepth, 0.f);
     const double layerLfo = lfoLayer.tick(0.23 + 0.11 * (double)layerIndex);
 
-    const int lfo2Sh = (int)readP(p.layerLfo2Shape[layerIndex], 0.f);
+    const int lfo2Sh = readChoiceIndex(p.layerLfo2Shape[layerIndex], 6, 0);
     lfoLayer2.setShape(juce::jlimit(0, 5, lfo2Sh));
     const float lfo2DepN = readP(p.layerLfo2Depth[layerIndex], 0.f);
     const double lfo2Hz = (double)readP(p.layerLfo2Rate[layerIndex], 2.f);
@@ -436,10 +471,10 @@ void VoiceLayer::renderAdd(double& outL,
     const double modSemi = filtEnv * 36.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
                            + (double)modMatrixCutSemi + layerLfo2 * 10.0 * (double)lfo2DepN;
 
-    const int ftype = juce::jlimit(0, 7, (int)readP(p.layerFtype[layerIndex], 0.f));
+    const int ftype = readChoiceIndex(p.layerFtype[layerIndex], 8, 0);
     updateFilterCoeffs(ftype, baseCut, resCtrl, modSemi);
 
-    const bool parallel = (int)readP(p.layerFilterRoute[layerIndex], 0.f) == 1;
+    const bool parallel = readChoiceIndex(p.layerFilterRoute[layerIndex], 2, 0) == 1;
 
     double y = 0;
     if (ftype == 6 && combDelaySamples > 0)

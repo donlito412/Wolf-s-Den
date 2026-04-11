@@ -1,5 +1,11 @@
 # Build output
 05_ASSETS/apex_project/build/
+05_ASSETS/apex_project/build2/
+05_ASSETS/apex_project/build3/
+
+# Local IDE
+.cursor/
+.vscode/
 
 # macOS system files
 .DS_Store

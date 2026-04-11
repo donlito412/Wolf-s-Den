@@ -1,0 +1,9 @@
+{
+  "name": "Lonely Sax",
+  "category": "Woodwinds",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

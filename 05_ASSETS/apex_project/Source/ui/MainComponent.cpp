@@ -64,7 +64,11 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
 
     topBar.onSelectPage = [this](int i) { showPage(i); };
     pageBrowse.onPresetOrSelectionChanged = [this] { topBar.refreshPresetLabel(); };
-    showPage(1);
+    topBar.onPresetNavigate = [this] {
+        pageBrowse.syncPresetSelectionFromProcessor();
+        topBar.refreshPresetLabel();
+    };
+    showPage(0);
     juce::ignoreUnused(processor);
 }
 
@@ -156,9 +160,11 @@ void MainComponent::timerCallback()
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Theme::backgroundDark());
-    g.setColour(juce::Colours::red);
-    g.setFont(20.0f);
-    g.drawText("v1.0.1", getLocalBounds().reduced(20), juce::Justification::topRight, false);
+    g.setColour(Theme::textDisabled());
+    g.setFont(Theme::fontLabel());
+    // Proves which binary the host loaded (changes every compile). Version comes from CMake/JUCE.
+    const juce::String stamp ("v" JucePlugin_VersionString " · built " __DATE__ " " __TIME__);
+    g.drawText(stamp, getLocalBounds().reduced(20), juce::Justification::topRight, false);
 }
 
 void MainComponent::resized()
@@ -169,8 +175,7 @@ void MainComponent::resized()
     if (midiKeyboard != nullptr)
         midiKeyboard->setBounds(r.removeFromBottom(68));
     for (int k = 0; k < 6; ++k)
-        if (pages[(size_t)k]->isVisible())
-            pages[(size_t)k]->setBounds(r);
+        pages[(size_t)k]->setBounds(r);
 }
 
 } // namespace wolfsden::ui

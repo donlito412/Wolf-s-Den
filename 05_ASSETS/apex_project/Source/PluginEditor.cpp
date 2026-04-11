@@ -8,7 +8,8 @@ WolfsDenAudioProcessorEditor::WolfsDenAudioProcessorEditor(WolfsDenAudioProcesso
 {
     addAndMakeVisible(mainComponent);
     setSize(1200, 780);
-    setResizable(true, false);
+    // Second arg = show corner resizer. With false, many hosts never expose a resize affordance.
+    setResizable(true, true);
     setResizeLimits(800, 550, 2560, 1600);
 }
 

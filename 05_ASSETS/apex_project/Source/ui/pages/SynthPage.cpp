@@ -88,7 +88,7 @@ void WaveformPreview::paint(juce::Graphics& g)
 void SynthPage::styleKnob(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
-    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 16);
+    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 22);
     s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentPrimary());
     s.setColour(juce::Slider::thumbColourId, Theme::accentHot());
 }
@@ -96,19 +96,20 @@ void SynthPage::styleKnob(juce::Slider& s)
 void SynthPage::styleHSlider(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::LinearHorizontal);
-    s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 18);
+    s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
 }
 
 void SynthPage::styleVFader(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::LinearVertical);
-    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 48, 16);
+    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 52, 22);
 }
 
 SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     : processor(proc)
     , apvts(proc.getAPVTS())
 {
+    setOpaque(true);
     for (int i = 0; i < 4; ++i)
     {
         layerTab[(size_t)i].setButtonText(juce::String::charToString((juce::juce_wchar)('A' + i)));
@@ -258,6 +259,27 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
             ampShape.repaint();
         };
 
+    // Load Sample button (visible only when osc type == 7 "Smp")
+    loadSampleBtn.setColour(juce::TextButton::buttonColourId, Theme::accentPrimary().withAlpha(0.4f));
+    loadSampleBtn.setColour(juce::TextButton::textColourOffId, Theme::textPrimary());
+    loadSampleBtn.setVisible(false);
+    loadSampleBtn.onClick = [this]
+    {
+        if (! sampleBrowser)
+        {
+            sampleBrowser = std::make_unique<WDSampleBrowserOverlay>(processor);
+            addAndMakeVisible(*sampleBrowser);
+            sampleBrowser->onSampleChosen = [this](int layerIndex, const SampleEntry& e)
+            {
+                processor.requestLayerSampleLoad(layerIndex, e.id, e.filePath,
+                                                 e.rootNote, e.isLoop, e.isOneShot, 0.f, 1.f);
+            };
+        }
+        sampleBrowser->setBounds(getLocalBounds().reduced(40, 30));
+        sampleBrowser->open(activeLayer);
+    };
+    addAndMakeVisible(loadSampleBtn);
+
     setActiveLayer(0);
     startTimerHz(15);
     juce::ignoreUnused(processor);
@@ -359,10 +381,12 @@ void SynthPage::syncOscButtons()
     }
 
     const bool isGranular = (idx == 5);
+    const bool isSample   = (idx == 7);
     for (auto* s : { &granPos, &granSize, &granDensity, &granScatter })
         s->setVisible(isGranular);
     for (auto* L : { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter })
         L->setVisible(isGranular);
+    loadSampleBtn.setVisible(isSample);
     filEnvShape.repaint();
     ampShape.repaint();
     resized();
@@ -386,7 +410,7 @@ void SynthPage::paint(juce::Graphics& g)
             return;
         g.setColour(Theme::textSecondary());
         g.setFont(Theme::fontPanelHeader());
-        g.drawText(title, zone.withHeight(18).reduced(4, 0), juce::Justification::centredLeft);
+        g.drawText(title, zone.withHeight(20).reduced(4, 0), juce::Justification::centredLeft);
     };
     drawColTitle(zoneOsc,  "OSCILLATOR");
     drawColTitle(zoneFilt, "FILTER");
@@ -402,8 +426,8 @@ void SynthPage::paint(juce::Graphics& g)
     // Knob labels for tune row
     if (!zoneOsc.isEmpty())
     {
-        const auto kbRow = oscOctave.getBounds().withTop(oscOctave.getBottom() - 12);
-        const auto tuneArea = juce::Rectangle<int>(zoneOsc.getX(), kbRow.getY(), zoneOsc.getWidth(), 12);
+        const auto kbRow = oscOctave.getBounds().withTop(oscOctave.getBottom() - 15);
+        const auto tuneArea = juce::Rectangle<int>(zoneOsc.getX(), kbRow.getY(), zoneOsc.getWidth(), 15);
         const int kw3 = (tuneArea.getWidth() - 4) / 3;
         g.setColour(Theme::textDisabled());
         g.setFont(Theme::fontLabel());
@@ -428,8 +452,8 @@ void SynthPage::paint(juce::Graphics& g)
         const int halfW = zoneLfo.getWidth() / 2;
         auto z1 = zoneLfo.withWidth(halfW);
         auto z2 = zoneLfo.withTrimmedLeft(halfW);
-        g.drawText("LFO 1", z1.removeFromTop(14).reduced(8, 0), juce::Justification::centredLeft);
-        g.drawText("LFO 2 (active layer)", z2.removeFromTop(14).reduced(8, 0), juce::Justification::centredLeft);
+        g.drawText("LFO 1", z1.removeFromTop(18).reduced(8, 0), juce::Justification::centredLeft);
+        g.drawText("LFO 2 (active layer)", z2.removeFromTop(18).reduced(8, 0), juce::Justification::centredLeft);
     }
 
     // Panel backgrounds for three columns
@@ -449,8 +473,8 @@ void SynthPage::resized()
     constexpr int kTitleH = 26;
     constexpr int kTabH = 36;
     constexpr int kSecTitle = 18;
-    constexpr int kLfoControlsH = 52;
-    constexpr int kLfoNoteH = 14;
+    constexpr int kLfoControlsH = 56;
+    constexpr int kLfoNoteH = 18;
     constexpr int kFootH = 18;
 
     auto bounds = getLocalBounds().reduced(kMargin);
@@ -468,8 +492,8 @@ void SynthPage::resized()
     zoneLfo = lfoBlock;
     auto lfo1Area = lfoBlock.removeFromLeft(lfoBlock.getWidth() / 2).reduced(6, 2);
     auto lfo2Area = lfoBlock.reduced(6, 2);
-    lfo1Area.removeFromTop(14);
-    lfo2Area.removeFromTop(14);
+    lfo1Area.removeFromTop(18);
+    lfo2Area.removeFromTop(18);
     {
         const int t = lfo1Area.getWidth() / 3;
         lfo1Rate.setBounds(lfo1Area.removeFromLeft(t).reduced(2, 0));
@@ -509,8 +533,8 @@ void SynthPage::resized()
 
     // Waveform preview
     const bool isGranular = granPos.isVisible();
-    const int granControlsH = isGranular ? (4 * 22 + 4) : 0; // 4 sliders with labels
-    const int tuneKnobH = 66;
+    const int granControlsH = isGranular ? (4 * (15 + 20 + 3) + 4) : 0; // label + slider + gap per row
+    const int tuneKnobH = 70;
     const int waveH = juce::jlimit(40, 80, juce::jmax(40, o.getBottom() - y - granControlsH - tuneKnobH - 8));
     wavePreview.setBounds(x0, y, cw, waveH);
     y += wavePreview.getHeight() + 6;
@@ -523,15 +547,22 @@ void SynthPage::resized()
         juce::Label*  gl[4] = { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter };
         for (int i = 0; i < 4; ++i)
         {
-            gl[(size_t)i]->setBounds(x0, y, cw, 12);
-            y += 12;
-            gs[(size_t)i]->setBounds(x0, y, cw, 18);
-            y += 20;
+            gl[(size_t)i]->setBounds(x0, y, cw, 15);
+            y += 15;
+            gs[(size_t)i]->setBounds(x0, y, cw, 20);
+            y += 23;
         }
     }
     else
     {
         y += granControlsH;
+    }
+
+    // "Browse Samples" button — only visible in Sample mode (osc type 7)
+    if (loadSampleBtn.isVisible())
+    {
+        loadSampleBtn.setBounds(x0, y, cw, 28);
+        y += 34;
     }
 
     // Tune: Octave / Semitone / Fine — three equal knobs
@@ -548,8 +579,8 @@ void SynthPage::resized()
     const int fcw = f.getWidth();
 
     // Filter 1 header
-    lblFilter1.setBounds(fx0, y, fcw, 16);
-    y += 18;
+    lblFilter1.setBounds(fx0, y, fcw, 18);
+    y += 20;
     filterType.setBounds(fx0, y, fcw, 24);
     y += 28;
     // Filter 1: Cutoff / Resonance / Drive knobs
@@ -562,8 +593,8 @@ void SynthPage::resized()
     y += 68;
 
     // Filter 2 header
-    lblFilter2Header.setBounds(fx0, y, fcw, 16);
-    y += 18;
+    lblFilter2Header.setBounds(fx0, y, fcw, 18);
+    y += 20;
     filter2Type.setBounds(fx0, y, fcw, 24);
     y += 28;
     // Filter 2: Cutoff / Resonance / Drive knobs
@@ -576,13 +607,13 @@ void SynthPage::resized()
     y += 68;
 
     // Routing
-    lblFilterTopology.setBounds(fx0, y, fcw, 14);
-    y += 16;
+    lblFilterTopology.setBounds(fx0, y, fcw, 16);
+    y += 18;
     filterRoute.setBounds(fx0, y, fcw, 24);
     y += 28;
 
     // Filter envelope
-    const int feH = 18;
+    const int feH = 22;
     filEnvA.setBounds(fx0, y, fcw, feH);
     y += feH + 2;
     filEnvD.setBounds(fx0, y, fcw, feH);
@@ -599,7 +630,7 @@ void SynthPage::resized()
     y = a.getY();
     const int ax0 = a.getX();
     const int acw = a.getWidth();
-    const int ah = 19;
+    const int ah = 22;
     ampA.setBounds(ax0, y, acw, ah);
     y += ah + 2;
     ampD.setBounds(ax0, y, acw, ah);

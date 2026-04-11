@@ -120,6 +120,8 @@ void TheoryEngine::initialise (const juce::File& dbFile)
     loadChordDefinitions();
     loadScaleDefinitions();
     loadChordSetListings();
+    loadPackListings();
+    loadPresetListings();
     rebuildScaleLookupTable();
 
     databaseReady.store (true, std::memory_order_release);
@@ -708,24 +710,61 @@ void TheoryEngine::createSchema()
             motion_id    INTEGER DEFAULT 0
         );
 
+        CREATE TABLE IF NOT EXISTS packs (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            name         TEXT NOT NULL,
+            author       TEXT NOT NULL DEFAULT 'Wolf Productions',
+            version      TEXT NOT NULL DEFAULT '1.0',
+            content_path TEXT,
+            installed_at INTEGER DEFAULT (strftime('%s','now'))
+        );
+
         CREATE TABLE IF NOT EXISTS presets (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL,
-            author     TEXT,
-            tags       TEXT,          -- JSON array of tag strings
-            category   TEXT,
-            created_at INTEGER DEFAULT (strftime('%s','now')),
-            state_blob BLOB
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            author          TEXT,
+            tags            TEXT,
+            category        TEXT,
+            pack_id         INTEGER REFERENCES packs(id),
+            sample_path     TEXT,
+            root_note       INTEGER DEFAULT 60,
+            loop_enabled    INTEGER DEFAULT 1,
+            one_shot        INTEGER DEFAULT 0,
+            env_attack      REAL DEFAULT 0.005,
+            env_decay       REAL DEFAULT 0.3,
+            env_sustain     REAL DEFAULT 0.8,
+            env_release     REAL DEFAULT 0.4,
+            created_at      INTEGER DEFAULT (strftime('%s','now')),
+            state_blob      BLOB
         );
 
         CREATE INDEX IF NOT EXISTS idx_chord_set_entries_set ON chord_set_entries(chord_set_id);
         CREATE INDEX IF NOT EXISTS idx_chord_sets_genre      ON chord_sets(genre);
         CREATE INDEX IF NOT EXISTS idx_chord_sets_mood       ON chord_sets(mood);
+        CREATE INDEX IF NOT EXISTS idx_presets_pack          ON presets(pack_id);
+        CREATE INDEX IF NOT EXISTS idx_presets_category      ON presets(category);
     )SQL";
 
     char* errMsg = nullptr;
     sqlite3_exec (db, sql, nullptr, nullptr, &errMsg);
     if (errMsg) sqlite3_free (errMsg);
+
+    // Migration: add columns to presets that may not exist in older DBs.
+    // ALTER TABLE ADD COLUMN is a no-op-safe pattern in SQLite (fails silently via ignoring error).
+    const char* migrations[] = {
+        "ALTER TABLE presets ADD COLUMN pack_id      INTEGER REFERENCES packs(id);",
+        "ALTER TABLE presets ADD COLUMN sample_path  TEXT;",
+        "ALTER TABLE presets ADD COLUMN root_note    INTEGER DEFAULT 60;",
+        "ALTER TABLE presets ADD COLUMN loop_enabled INTEGER DEFAULT 1;",
+        "ALTER TABLE presets ADD COLUMN one_shot     INTEGER DEFAULT 0;",
+        "ALTER TABLE presets ADD COLUMN env_attack   REAL DEFAULT 0.005;",
+        "ALTER TABLE presets ADD COLUMN env_decay    REAL DEFAULT 0.3;",
+        "ALTER TABLE presets ADD COLUMN env_sustain  REAL DEFAULT 0.8;",
+        "ALTER TABLE presets ADD COLUMN env_release  REAL DEFAULT 0.4;",
+        nullptr
+    };
+    for (int i = 0; migrations[i] != nullptr; ++i)
+        sqlite3_exec (db, migrations[i], nullptr, nullptr, nullptr); // intentionally ignore errors
 }
 
 // =============================================================================
@@ -1049,6 +1088,354 @@ void TheoryEngine::loadChordSetListings()
         chordSetList.push_back (std::move (row));
     }
     sqlite3_finalize (stmt);
+}
+
+// =============================================================================
+// Preset system — load
+// =============================================================================
+
+void TheoryEngine::loadPackListings()
+{
+    if (!db) return;
+    packList.clear();
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (db,
+            "SELECT id, name, author, version, IFNULL(content_path,'') FROM packs ORDER BY id;",
+            -1, &stmt, nullptr) != SQLITE_OK)
+        return;
+
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+        PackListing p;
+        p.id          = sqlite3_column_int  (stmt, 0);
+        p.name        = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 1));
+        p.author      = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 2));
+        p.version     = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 3));
+        p.contentPath = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 4));
+        packList.push_back (std::move (p));
+    }
+    sqlite3_finalize (stmt);
+}
+
+void TheoryEngine::loadPresetListings()
+{
+    if (!db) return;
+    presetList.clear();
+
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql =
+        "SELECT p.id, p.name, IFNULL(p.author,''), IFNULL(p.category,''), IFNULL(p.tags,''), "
+        "       IFNULL(p.pack_id,0), IFNULL(pk.name,''), IFNULL(p.sample_path,''), "
+        "       p.root_note, p.loop_enabled, p.one_shot, "
+        "       p.env_attack, p.env_decay, p.env_sustain, p.env_release, "
+        "       (p.state_blob IS NULL) as is_factory "
+        "FROM presets p "
+        "LEFT JOIN packs pk ON pk.id = p.pack_id "
+        "ORDER BY p.pack_id ASC, p.category ASC, p.name ASC;";
+
+    if (sqlite3_prepare_v2 (db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return;
+
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+        PresetListing pr;
+        pr.id           = sqlite3_column_int  (stmt, 0);
+        pr.name         = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 1));
+        pr.author       = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 2));
+        pr.category     = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 3));
+        pr.tags         = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 4));
+        pr.packId       = sqlite3_column_int  (stmt, 5);
+        pr.packName     = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 6));
+        pr.samplePath   = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 7));
+        pr.rootNote     = sqlite3_column_int  (stmt, 8);
+        pr.loopEnabled  = sqlite3_column_int  (stmt, 9) != 0;
+        pr.oneShot      = sqlite3_column_int  (stmt, 10) != 0;
+        pr.envAttack    = (float) sqlite3_column_double (stmt, 11);
+        pr.envDecay     = (float) sqlite3_column_double (stmt, 12);
+        pr.envSustain   = (float) sqlite3_column_double (stmt, 13);
+        pr.envRelease   = (float) sqlite3_column_double (stmt, 14);
+        pr.isFactory    = sqlite3_column_int  (stmt, 15) != 0;
+        presetList.push_back (std::move (pr));
+    }
+    sqlite3_finalize (stmt);
+}
+
+void TheoryEngine::reloadPresetListings()
+{
+    loadPackListings();
+    loadPresetListings();
+}
+
+// =============================================================================
+// Preset system — CRUD
+// =============================================================================
+
+int TheoryEngine::savePreset (const std::string& name,
+                               const std::string& author,
+                               const std::string& category,
+                               const std::string& tags,
+                               int packId,
+                               const void* blob,
+                               int blobSize)
+{
+    if (!db) return -1;
+
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql =
+        "INSERT INTO presets (name, author, category, tags, pack_id, state_blob) "
+        "VALUES (?, ?, ?, ?, ?, ?);";
+
+    if (sqlite3_prepare_v2 (db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return -1;
+
+    sqlite3_bind_text (stmt, 1, name.c_str(),     -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 2, author.c_str(),   -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 3, category.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text (stmt, 4, tags.c_str(),     -1, SQLITE_TRANSIENT);
+
+    if (packId > 0)
+        sqlite3_bind_int (stmt, 5, packId);
+    else
+        sqlite3_bind_null (stmt, 5);
+
+    if (blob != nullptr && blobSize > 0)
+        sqlite3_bind_blob (stmt, 6, blob, blobSize, SQLITE_TRANSIENT);
+    else
+        sqlite3_bind_null (stmt, 6);
+
+    sqlite3_step (stmt);
+    sqlite3_finalize (stmt);
+
+    const int newId = (int) sqlite3_last_insert_rowid (db);
+    loadPresetListings(); // refresh cache
+    return newId;
+}
+
+juce::MemoryBlock TheoryEngine::loadPresetBlob (int presetId) const
+{
+    if (!db) return {};
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (db,
+            "SELECT state_blob FROM presets WHERE id = ?;",
+            -1, &stmt, nullptr) != SQLITE_OK)
+        return {};
+
+    sqlite3_bind_int (stmt, 1, presetId);
+
+    juce::MemoryBlock result;
+    if (sqlite3_step (stmt) == SQLITE_ROW && sqlite3_column_type (stmt, 0) != SQLITE_NULL)
+    {
+        const int bytes = sqlite3_column_bytes (stmt, 0);
+        if (bytes > 0)
+            result.append (sqlite3_column_blob (stmt, 0), (size_t) bytes);
+    }
+    sqlite3_finalize (stmt);
+    return result;
+}
+
+void TheoryEngine::deletePreset (int presetId)
+{
+    if (!db) return;
+
+    // Guard: do not allow deleting factory presets (pack_id = 1, state_blob IS NULL)
+    sqlite3_stmt* check = nullptr;
+    if (sqlite3_prepare_v2 (db,
+            "SELECT (state_blob IS NULL) FROM presets WHERE id = ?;",
+            -1, &check, nullptr) == SQLITE_OK)
+    {
+        sqlite3_bind_int (check, 1, presetId);
+        if (sqlite3_step (check) == SQLITE_ROW && sqlite3_column_int (check, 0) != 0)
+        {
+            sqlite3_finalize (check);
+            return; // factory preset — not deletable
+        }
+        sqlite3_finalize (check);
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2 (db,
+            "DELETE FROM presets WHERE id = ?;",
+            -1, &stmt, nullptr) == SQLITE_OK)
+    {
+        sqlite3_bind_int (stmt, 1, presetId);
+        sqlite3_step (stmt);
+        sqlite3_finalize (stmt);
+    }
+    loadPresetListings();
+}
+
+// =============================================================================
+// Preset system — factory seeding
+// =============================================================================
+
+void TheoryEngine::seedFactoryPresets (const juce::File& contentDir)
+{
+    if (!db) return;
+
+    // -------------------------------------------------------------------------
+    // 1. Ensure factory pack row exists (id = 1)
+    // -------------------------------------------------------------------------
+    sqlite3_exec (db,
+        "INSERT OR IGNORE INTO packs (id, name, author, version, content_path) "
+        "VALUES (1, 'Wolf''s Den Factory', 'Wolf Productions', '1.0', '');",
+        nullptr, nullptr, nullptr);
+
+    // -------------------------------------------------------------------------
+    // 2. If factory presets already seeded, skip
+    // -------------------------------------------------------------------------
+    {
+        sqlite3_stmt* s = nullptr;
+        int count = 0;
+        if (sqlite3_prepare_v2 (db,
+                "SELECT COUNT(*) FROM presets WHERE pack_id = 1;",
+                -1, &s, nullptr) == SQLITE_OK)
+        {
+            if (sqlite3_step (s) == SQLITE_ROW)
+                count = sqlite3_column_int (s, 0);
+            sqlite3_finalize (s);
+        }
+        if (count > 0)
+        {
+            // Update the stored content_path to match current bundle location
+            sqlite3_stmt* upd = nullptr;
+            if (sqlite3_prepare_v2 (db,
+                    "UPDATE packs SET content_path = ? WHERE id = 1;",
+                    -1, &upd, nullptr) == SQLITE_OK)
+            {
+                const std::string cp = contentDir.getFullPathName().toStdString();
+                sqlite3_bind_text (upd, 1, cp.c_str(), -1, SQLITE_TRANSIENT);
+                sqlite3_step (upd);
+                sqlite3_finalize (upd);
+            }
+            loadPackListings();
+            loadPresetListings();
+            return;
+        }
+    }
+
+    // Store absolute path so loader can resolve WAV files
+    {
+        sqlite3_stmt* upd = nullptr;
+        if (sqlite3_prepare_v2 (db,
+                "UPDATE packs SET content_path = ? WHERE id = 1;",
+                -1, &upd, nullptr) == SQLITE_OK)
+        {
+            const std::string cp = contentDir.getFullPathName().toStdString();
+            sqlite3_bind_text (upd, 1, cp.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_step (upd);
+            sqlite3_finalize (upd);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Seed 41 factory presets (state_blob = NULL → recipe-based load)
+    // -------------------------------------------------------------------------
+    struct FactoryDef
+    {
+        const char* name;
+        const char* category;
+        const char* relPath;
+        int rootNote;
+        int loop;    // 1=loop, 0=one-shot
+        int oneShot; // 1=one-shot trigger
+        float atk, dec, sus, rel;
+    };
+
+    static const FactoryDef kFactory[] =
+    {
+        // Bass — root C2 (36), loop, punchy envelope
+        { "Concrete Flex",   "Bass",      "Bass/Concrete Flex.wav",   36, 1, 0, 0.002f, 0.25f, 0.70f, 0.25f },
+        { "Graveyard 808",   "Bass",      "Bass/Graveyard 808.wav",   36, 1, 0, 0.002f, 0.30f, 0.75f, 0.30f },
+        { "Low End Phantom", "Bass",      "Bass/Low End Phantom.wav", 36, 1, 0, 0.003f, 0.35f, 0.70f, 0.35f },
+        { "Night Stalker",   "Bass",      "Bass/Night Stalker.wav",   36, 1, 0, 0.002f, 0.25f, 0.65f, 0.20f },
+
+        // Horns — root C4 (60), loop, wind-style envelope
+        { "Midnight Horn",   "Horns",     "Horns/Midnight Horn.wav",  60, 1, 0, 0.015f, 0.20f, 0.80f, 0.20f },
+        { "Street Brass",    "Horns",     "Horns/Street Brass.wav",   60, 1, 0, 0.010f, 0.15f, 0.85f, 0.15f },
+        { "War Call",        "Horns",     "Horns/War Call.wav",       60, 1, 0, 0.008f, 0.18f, 0.82f, 0.18f },
+
+        // Keys — root C4 (60), natural decay
+        { "Accustic Keys",   "Keys",      "Keys/Accustic Keys.wav",   60, 0, 1, 0.003f, 0.50f, 0.00f, 0.40f },
+        { "Afterhours Suite","Keys",      "Keys/Afterhours Suite.wav",60, 0, 1, 0.004f, 0.55f, 0.00f, 0.50f },
+        { "Grand Ivory",     "Keys",      "Keys/Grand Ivory.wav",     60, 0, 1, 0.002f, 0.60f, 0.00f, 0.60f },
+        { "Midnight Organ",  "Keys",      "Keys/Midnight Organ.wav",  60, 1, 0, 0.008f, 0.20f, 0.90f, 0.30f },
+        { "Rhodes",          "Keys",      "Keys/Rhodes.wav",          60, 0, 1, 0.003f, 0.45f, 0.00f, 0.45f },
+        { "Velvet Room",     "Keys",      "Keys/Velvet Room.wav",     60, 1, 0, 0.006f, 0.25f, 0.85f, 0.35f },
+
+        // Leads — root C4 (60), fast attack, sustain
+        { "Chrome Runner",   "Leads",     "Leads/Chrome Runner.wav",  60, 1, 0, 0.003f, 0.10f, 0.90f, 0.15f },
+        { "Dark Star",       "Leads",     "Leads/Dark Star.wav",      60, 1, 0, 0.004f, 0.12f, 0.88f, 0.18f },
+        { "Howling Lead",    "Leads",     "Leads/Howling Lead.wav",   60, 1, 0, 0.005f, 0.10f, 0.92f, 0.20f },
+        { "Midnight Siren",  "Leads",     "Leads/Midnight Siren.wav", 60, 1, 0, 0.006f, 0.12f, 0.88f, 0.22f },
+        { "Neon Blade",      "Leads",     "Leads/Neon Blade.wav",     60, 1, 0, 0.003f, 0.08f, 0.92f, 0.12f },
+        { "Street Prophet",  "Leads",     "Leads/Street Prophet.wav", 60, 1, 0, 0.004f, 0.10f, 0.90f, 0.15f },
+        { "Wolf Cry",        "Leads",     "Leads/Wolf Cry.wav",       60, 1, 0, 0.005f, 0.12f, 0.88f, 0.20f },
+
+        // Pads — root C4 (60), slow attack, long release
+        { "Black Cathedral", "Pads",      "Pads/Black Cathedral.wav", 60, 1, 0, 0.40f,  1.20f, 0.85f, 2.00f },
+        { "Frozen Horizon",  "Pads",      "Pads/Frozen Horizon.wav",  60, 1, 0, 0.50f,  1.00f, 0.88f, 2.50f },
+        { "Low Gravity",     "Pads",      "Pads/Low Gravity.wav",     60, 1, 0, 0.35f,  0.80f, 0.82f, 1.80f },
+        { "Neon Halo",       "Pads",      "Pads/Neon Halo.wav",       60, 1, 0, 0.30f,  0.90f, 0.85f, 2.00f },
+
+        // Plucks — root C4 (60), instant attack, fast decay, one-shot
+        { "Frostbite",       "Plucks",    "Plucks/Frostbite.wav",     60, 0, 1, 0.001f, 0.35f, 0.00f, 0.25f },
+        { "Ghost Notes",     "Plucks",    "Plucks/Ghost Notes.wav",   60, 0, 1, 0.001f, 0.40f, 0.00f, 0.30f },
+        { "Hollow Picc",     "Plucks",    "Plucks/Hollow Picc.wav",   60, 0, 1, 0.001f, 0.30f, 0.00f, 0.20f },
+        { "Ice Fang",        "Plucks",    "Plucks/Ice Fang.wav",      60, 0, 1, 0.001f, 0.28f, 0.00f, 0.18f },
+        { "Pulse Drop",      "Plucks",    "Plucks/Pulse Drop.wav",    60, 0, 1, 0.001f, 0.32f, 0.00f, 0.22f },
+        { "Silver Accustic", "Plucks",    "Plucks/Silver Accustic.wav",60,0, 1, 0.001f, 0.38f, 0.00f, 0.28f },
+        { "Wireframe",       "Plucks",    "Plucks/Wireframe.wav",     60, 0, 1, 0.001f, 0.25f, 0.00f, 0.15f },
+
+        // Strings — root C4 (60), bowed attack, loop sustain
+        { "Broken Cello",    "Strings",   "Strings/Broken Cello.wav", 60, 1, 0, 0.06f,  0.40f, 0.85f, 0.80f },
+        { "Cold Arco",       "Strings",   "Strings/Cold Arco.wav",    60, 1, 0, 0.08f,  0.35f, 0.88f, 0.70f },
+        { "Midnight Strings","Strings",   "Strings/Midnight Strings.wav",60,1,0,0.10f,  0.50f, 0.85f, 1.00f },
+        { "Street Cello",    "Strings",   "Strings/Street Cello.wav", 60, 1, 0, 0.07f,  0.40f, 0.82f, 0.75f },
+        { "Velvet Violin",   "Strings",   "Strings/Velvet Violin.wav",60, 1, 0, 0.05f,  0.35f, 0.88f, 0.65f },
+
+        // Woodwinds — root C4 (60), breath attack, loop
+        { "Lonely Sax",      "Woodwinds", "Woodwinds/Lonely Sax.wav",    60, 1, 0, 0.02f, 0.20f, 0.85f, 0.25f },
+        { "Midnight Flute",  "Woodwinds", "Woodwinds/Midnight Flute.wav",60, 1, 0, 0.02f, 0.18f, 0.88f, 0.22f },
+        { "Silver Reed",     "Woodwinds", "Woodwinds/Silver Reed.wav",   60, 1, 0, 0.018f,0.22f, 0.85f, 0.28f },
+        { "Smoked Oboe",     "Woodwinds", "Woodwinds/Smoked Oboe.wav",   60, 1, 0, 0.015f,0.20f, 0.85f, 0.25f },
+        { "Urban Bassoon",   "Woodwinds", "Woodwinds/Urban Bassoon.wav", 60, 1, 0, 0.025f,0.25f, 0.82f, 0.30f },
+    };
+
+    sqlite3_exec (db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+
+    sqlite3_stmt* ins = nullptr;
+    const char* insSql =
+        "INSERT INTO presets "
+        "(name, author, category, pack_id, sample_path, root_note, loop_enabled, one_shot, "
+        " env_attack, env_decay, env_sustain, env_release, state_blob) "
+        "VALUES (?, 'Wolf Productions', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, NULL);";
+
+    if (sqlite3_prepare_v2 (db, insSql, -1, &ins, nullptr) == SQLITE_OK)
+    {
+        for (const auto& def : kFactory)
+        {
+            sqlite3_reset (ins);
+            sqlite3_bind_text (ins, 1,  def.name,     -1, SQLITE_STATIC);
+            sqlite3_bind_text (ins, 2,  def.category, -1, SQLITE_STATIC);
+            sqlite3_bind_text (ins, 3,  def.relPath,  -1, SQLITE_STATIC);
+            sqlite3_bind_int  (ins, 4,  def.rootNote);
+            sqlite3_bind_int  (ins, 5,  def.loop);
+            sqlite3_bind_int  (ins, 6,  def.oneShot);
+            sqlite3_bind_double (ins, 7,  (double) def.atk);
+            sqlite3_bind_double (ins, 8,  (double) def.dec);
+            sqlite3_bind_double (ins, 9,  (double) def.sus);
+            sqlite3_bind_double (ins, 10, (double) def.rel);
+            sqlite3_step (ins);
+        }
+        sqlite3_finalize (ins);
+    }
+
+    sqlite3_exec (db, "COMMIT;", nullptr, nullptr, nullptr);
+
+    loadPackListings();
+    loadPresetListings();
 }
 
 // =============================================================================

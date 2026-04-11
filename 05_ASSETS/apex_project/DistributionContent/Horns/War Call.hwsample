@@ -1,0 +1,9 @@
+{
+  "name": "War Call",
+  "category": "Horns",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

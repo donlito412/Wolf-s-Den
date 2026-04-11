@@ -269,9 +269,9 @@ void ModPage::paint(juce::Graphics& g)
     // Matrix column headers — positioned after slotPage (26) + gap (6)
     const int hdrY = r.getY() + 26 + 6;
     const int aw = leftW;
-    const int srcW  = juce::jmax(70, aw * 22 / 100);
-    const int tgtW  = juce::jmax(80, aw * 26 / 100);
-    const int amtW  = juce::jmax(70, aw * 22 / 100);
+    const int srcW  = juce::jmax(78, aw * 24 / 100);
+    const int tgtW  = juce::jmax(132, aw * 40 / 100);
+    const int amtW  = juce::jmax(64, aw * 20 / 100);
     auto hdrR = juce::Rectangle<int>(r.getX(), hdrY, aw, 14);
     auto h = hdrR;
     g.setColour(Theme::textSecondary());
@@ -302,9 +302,9 @@ void ModPage::resized()
     const int rowH = 28;
     // Scale columns proportionally to available width
     const int aw = left.getWidth();
-    const int srcW  = juce::jmax(70, aw * 22 / 100);
-    const int tgtW  = juce::jmax(80, aw * 26 / 100);
-    const int amtW  = juce::jmax(70, aw * 22 / 100);
+    const int srcW  = juce::jmax(78, aw * 24 / 100);
+    const int tgtW  = juce::jmax(132, aw * 40 / 100);
+    const int amtW  = juce::jmax(64, aw * 20 / 100);
     const int invW  = 32;
     const int mutW  = 26;
     const int scpW  = juce::jmax(46, aw - srcW - tgtW - amtW - invW - mutW);

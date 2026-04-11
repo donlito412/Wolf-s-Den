@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../theme/UITheme.h"
+#include "WDSampleBrowserOverlay.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -114,6 +115,10 @@ private:
     juce::ComboBox lfo1Shape;
     juce::Slider lfo2Rate, lfo2Depth;
     juce::ComboBox lfo2Shape;
+
+    // Sample browser (visible only when osc type == 7 "Smp")
+    juce::TextButton loadSampleBtn { "Browse Samples…" };
+    std::unique_ptr<WDSampleBrowserOverlay> sampleBrowser;
 
     /** Layout zones (updated in resized) for section titles in paint — TASK_009 columns + LFO strip. */
     juce::Rectangle<int> zoneOsc, zoneFilt, zoneAmp, zoneLfo;

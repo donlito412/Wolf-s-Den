@@ -13,9 +13,12 @@ juce::Typeface::Ptr loadInter()
 
 juce::Font makeFont(float heightPts)
 {
+    auto opts = juce::FontOptions()
+                    .withHeight(heightPts)
+                    .withMetricsKind(juce::TypefaceMetricsKind::legacy);
     if (auto tf = Theme::interTypeface())
-        return juce::Font(juce::FontOptions().withHeight(heightPts).withTypeface(tf));
-    return juce::Font(juce::FontOptions().withHeight(heightPts));
+        opts = opts.withTypeface(tf);
+    return juce::Font(opts);
 }
 } // namespace
 
@@ -25,9 +28,9 @@ juce::Typeface::Ptr Theme::interTypeface()
     return face;
 }
 
-juce::Font Theme::fontLabel() { return makeFont(10.0f); }
-juce::Font Theme::fontValue() { return makeFont(12.0f); }
-juce::Font Theme::fontPanelHeader() { return makeFont(14.0f); }
-juce::Font Theme::fontPageHeader() { return makeFont(18.0f); }
+juce::Font Theme::fontLabel() { return makeFont(11.0f); }
+juce::Font Theme::fontValue() { return makeFont(13.0f); }
+juce::Font Theme::fontPanelHeader() { return makeFont(15.0f); }
+juce::Font Theme::fontPageHeader() { return makeFont(19.0f); }
 
 } // namespace wolfsden::ui

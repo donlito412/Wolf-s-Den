@@ -3,11 +3,13 @@
 #include "ModMatrix.h"
 #include "synth/SynthDSP.h"
 #include "synth/VoiceLayer.h"
+#include "samples/WDSampleLibrary.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
+#include <mutex>
 
 namespace wolfsden
 {
@@ -36,6 +38,16 @@ public:
 
     /** Active voices with any layer still sounding (same gate as voice stealing). */
     int countActiveVoices() const noexcept;
+
+    /** Silence every voice immediately (must be called from the audio thread). */
+    void allNotesOff() noexcept;
+
+    /** Load a sample into every voice's layer at layerIndex (queued on a single worker thread). */
+    void loadLayerSample (int layerIndex, int sampleId, const juce::String& filePath,
+                          int rootNoteMidi, bool loopEnabled, bool oneShot,
+                          float startFrac = 0.f, float endFrac = 1.f);
+
+    WDSampleLibrary& getSampleLibrary() noexcept { return sampleLibrary; }
 
     SynthEngine(const SynthEngine&) = delete;
     SynthEngine& operator=(const SynthEngine&) = delete;
@@ -81,6 +93,11 @@ private:
 
     ParamPointers ptrs {};
     bool pointersBound = false;
+
+    WDSampleLibrary sampleLibrary;
+
+    /** One in-flight layer load at a time — overlapping Thread::launch calls interleave loadNow and corrupt buffers. */
+    std::mutex layerSampleLoadMutex;
 };
 
 } // namespace wolfsden

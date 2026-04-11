@@ -219,3 +219,37 @@ Output:
 Details: All spec'd UI features from TASK_009 now implemented. Deferred items (audio preview, MIDI capture export, FX drag-reorder, XY→DAW record, CoF adjacent popup) are correctly documented as future work and not in the build under finished names.
 Next Step: TASK_010 — integration testing in target DAW hosts
 Status: DONE
+
+---
+
+[2026-04-10]
+
+Agent: Claude
+Task: Preset System — full implementation (patch presets, factory library, expansion pack architecture)
+Output:
+  - `Source/engine/TheoryEngine.h` — added `PackListing`, `PresetListing` structs; public API: `getPresetListings()`, `getPackListings()`, `seedFactoryPresets()`, `reloadPresetListings()`, `savePreset()`, `loadPresetBlob()`, `deletePreset()`
+  - `Source/engine/TheoryEngine.cpp` — updated `createSchema()` with `packs` table + migration columns on `presets`; added `loadPackListings()`, `loadPresetListings()`, `savePreset()`, `loadPresetBlob()`, `deletePreset()`, `seedFactoryPresets()` (seeds all 41 factory WAV-backed presets + factory pack row on first launch; no-op on subsequent launches); `initialise()` now calls `loadPackListings` + `loadPresetListings`
+  - `Source/PluginProcessor.h` — added `saveCurrentAsPreset()`, `loadPresetById()`, `cyclePreset()`, `getCurrentPresetId()`, `getFactoryContentDir()`; private `applyFactoryPreset()` and `factoryContentDir` + `currentPresetId` members
+  - `Source/PluginProcessor.cpp` — constructor stores `factoryContentDir` and calls `seedFactoryPresets()`; `saveCurrentAsPreset()` serialises APVTS+ModMatrix+CustomState blob → DB; `loadPresetById()` dispatches recipe (factory) vs full state-restore (user); `applyFactoryPreset()` sets layer 0 osc to Sample mode, applies per-category ADSR via `setValueNotifyingHost`, calls `requestLayerSampleLoad()`; `cyclePreset()` steps through DB list; state serialisation extended to round-trip `currentPresetId`
+  - `Source/ui/pages/BrowsePage.h` — added `BrowseMode` enum, `BrowsePatchCard` inner class, mode toggle buttons, Patches sidebar members (category pills, pack filter, save button), `syncPresetSelectionFromProcessor()`
+  - `Source/ui/pages/BrowsePage.cpp` — full PATCHES mode: `BrowsePatchCard` with factory badge, star/delete, category accent colours; `switchMode()`, `ensurePatchFiltersBuilt()`, `layoutPatchSidebar()`, `presetRowMatchesFilters()`, `rebuildFilteredPresetIndices()`, `rebuildPatchCardGrid()`, `selectPresetForCard()`, `deletePresetForCard()`, `onSavePresetClicked()` (AlertWindow name dialog); Chord Sets mode fully preserved; mode toggle buttons in resized(); paint() detail strip varies by mode
+  - `Source/ui/chrome/TopBar.h/.cpp` — renamed `onBrowsePresetNavigate` → `onPresetNavigate`; `< >` now calls `processor.cyclePreset()` (steps through patch presets, not chord sets)
+  - `Source/ui/MainComponent.cpp` — wired `onPresetNavigate` → `syncPresetSelectionFromProcessor()` + `refreshPresetLabel()`
+Details:
+  Chord sets remain fully intact in the CHORD SETS tab; they are now correctly separated from sound patches.
+  Factory presets: 41 WAV-backed recipes (Bass×4, Horns×3, Keys×6, Leads×7, Pads×4, Plucks×7, Strings×5, Woodwinds×5) seeded to `theory.db` on first launch. Each recipe configures layer 0 oscillator mode, per-category ADSR envelope, and sample path; other layers and FX are untouched (instrument slot swap, not full state wipe).
+  Expansion pack architecture: `packs` table in DB, `pack_id` FK on `presets`, pack filter in Browse sidebar. Third-party packs install WAVs to `~/Library/Application Support/Wolf Productions/Wolf's Den/Packs/<name>/` and register a row in `packs`.
+  Quality bar met: factory presets are named honestly (WAV instrument names), delete is guarded against factory rows, save dialog gives user explicit naming control.
+Next Step: TASK_010 — integration testing (preset load/save round-trip + DAW compatibility)
+Status: DONE
+
+---
+
+[2026-04-11]
+
+Agent: Cursor
+Task: TASK_010 — execution (integration report + build verification; no code changes)
+Output: `/03_OUTPUTS/010_integration_test_report.md`
+Details: Ran Release `WolfsDen_ship` on `05_ASSETS/apex_project/build3` (zero errors). Filled checklist honestly: build PASS; preset/chord UI and DB paths CODE/PASS where statically verifiable; DAW/audio/CPU/1h crash items NOT RUN in agent environment. Open issues logged in report: no UndoManager (FAIL vs checklist), editor size not restored from saved state (FAIL). TASK_010 remains PENDING until all checklist items PASS per task constraints.
+Next Step: User runs DAW/M1 tests; address BUG_INT_001/BUG_INT_002 if full PASS required; then mark TASK_010 DONE
+Status: (TASK_010 file) PENDING

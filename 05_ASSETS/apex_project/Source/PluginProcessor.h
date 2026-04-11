@@ -62,11 +62,56 @@ public:
     void setPresetDisplayName(juce::String name);
     juce::String getPresetDisplayName() const;
 
+    /** Browse-page chord-set pack (SQL `chord_sets.id`); drives preset bar name when set from cards or < >. */
+    void setBrowseChordSetSelection(int chordSetDbId);
+    int getBrowseChordSetId() const;
+    void cycleBrowseChordSet(int delta);
+
+    // =========================================================================
+    // Patch preset system  (message thread)
+    // =========================================================================
+
+    /**
+     * Save the current full plugin state (APVTS + ModMatrix + custom) as a named
+     * user preset in the DB.  category is e.g. "User", "Synth", "Keys".
+     * Returns the new preset id, or -1 on failure.
+     */
+    int  saveCurrentAsPreset (const juce::String& name,
+                              const juce::String& category = "User");
+
+    /**
+     * Load a preset by DB id.
+     * Factory presets (isFactory) apply a recipe (sample + ADSR) to layer 0
+     * while leaving other layers/FX at their current settings — like an
+     * instrument slot swap.  User presets fully restore all state.
+     * Returns true on success.
+     */
+    bool loadPresetById (int presetId);
+
+    /** Step forward (+1) or backward (-1) through the loaded preset list. */
+    void cyclePreset (int delta);
+
+    /** The DB id of the last successfully loaded/saved preset (-1 = none). */
+    int  getCurrentPresetId() const noexcept;
+
+    /** Absolute path to the factory sample content directory. */
+    juce::File getFactoryContentDir() const noexcept { return factoryContentDir; }
+
     void setLastEditorBounds(int width, int height);
 
     wolfsden::TheoryEngine& getTheoryEngine() noexcept { return theoryEngine; }
     const wolfsden::TheoryEngine& getTheoryEngine() const noexcept { return theoryEngine; }
     wolfsden::SynthEngine& getSynthEngine() noexcept { return synthEngine; }
+
+    wolfsden::WDSampleLibrary& getSampleLibrary() noexcept { return synthEngine.getSampleLibrary(); }
+
+    /** Call from the UI (message thread) when the user selects a sample for a layer. */
+    void requestLayerSampleLoad (int layerIndex, int sampleId, const juce::String& filePath,
+                                 int rootNoteMidi, bool loopEnabled, bool oneShot,
+                                 float startFrac = 0.f, float endFrac = 1.f)
+    {
+        synthEngine.loadLayerSample (layerIndex, sampleId, filePath, rootNoteMidi, loopEnabled, oneShot, startFrac, endFrac);
+    }
 
     void setTheoryDetectionMidi() noexcept;
     void setTheoryDetectionAudio() noexcept;
@@ -99,9 +144,16 @@ private:
     wolfsden::SynthEngine synthEngine;
     wolfsden::FxEngine fxEngine;
 
+    /** Apply a factory preset recipe to layer 0 (called on message thread). */
+    void applyFactoryPreset (const wolfsden::PresetListing& preset);
+
     mutable juce::CriticalSection customStateLock;
     juce::String presetDisplayName { "Init" };
     juce::String chordProgressionBlob;
+    int browseChordSetId { -1 };
+    int currentPresetId  { -1 };   ///< DB id of active preset; -1 = unsaved/init
+
+    juce::File factoryContentDir;  ///< path to bundle Resources/Factory (WAV root)
 
     std::atomic<int> editorWidth { 480 };
     std::atomic<int> editorHeight { 320 };
@@ -114,6 +166,7 @@ private:
     std::atomic<float> cpuSmoothed { 0.f };
     std::atomic<bool> isHostPlaying { false };
     std::atomic<int> midiActivityFlag { 0 }; // 1 = flash LED until UI consumes
+    std::atomic<bool> pendingAllNotesOff { false }; // set by UI thread; consumed by audio thread
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WolfsDenAudioProcessor)
 };

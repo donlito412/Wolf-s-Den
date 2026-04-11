@@ -94,6 +94,11 @@ private:
     std::array<std::atomic<float>*, 96> slotEqBandDb {};
 
     std::vector<std::unique_ptr<SlotDSP>> slotDSPs;
+
+    /** Pre-sized in prepare(); no heap alloc in processBlock / processRack. */
+    juce::AudioBuffer<float> scratchLayerStereo;
+    juce::AudioBuffer<float> scratchMixStereo;
+    juce::AudioBuffer<float> scratchReverbWet;
 };
 
 } // namespace wolfsden

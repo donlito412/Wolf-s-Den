@@ -35,12 +35,16 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(presetPrev);
     addAndMakeVisible(presetNext);
     presetPrev.onClick = [this] {
-        processor.setPresetDisplayName("Preset (prev)");
+        processor.cyclePreset (-1);
         refreshPresetLabel();
+        if (onPresetNavigate)
+            onPresetNavigate();
     };
     presetNext.onClick = [this] {
-        processor.setPresetDisplayName("Preset (next)");
+        processor.cyclePreset (+1);
         refreshPresetLabel();
+        if (onPresetNavigate)
+            onPresetNavigate();
     };
 
     addAndMakeVisible(settingsBtn);
@@ -113,10 +117,6 @@ void TopBar::paint(juce::Graphics& g)
             g.drawLine(b.getX() + 4.f, b.getBottom() - 2.f, b.getRight() - 4.f, b.getBottom() - 2.f, 2.f);
         }
     }
-    
-    g.setColour(juce::Colours::red);
-    g.setFont(18.0f);
-    g.drawText("v1.0.3", getLocalBounds().reduced(290, 10).withTrimmedRight(180), juce::Justification::centredRight, false);
 }
 
 void TopBar::resized()
@@ -130,7 +130,7 @@ void TopBar::resized()
         tabs[(size_t)i]->setBounds(r.removeFromLeft(tabW).reduced(2, 0));
 
     r.removeFromLeft(16);
-    auto centre = r.removeFromLeft(juce::jmin(280, r.getWidth() / 3));
+    auto centre = r.removeFromLeft(juce::jmin(420, juce::jmax(240, r.getWidth() / 2)));
     presetPrev.setBounds(centre.removeFromLeft(28));
     presetLabel.setBounds(centre.reduced(4, 0));
     presetNext.setBounds(centre.removeFromRight(28));

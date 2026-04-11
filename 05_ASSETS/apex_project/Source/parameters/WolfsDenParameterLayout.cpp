@@ -333,7 +333,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
         pid("midi_chord_inversion"), "Chord Inversion", 0, 3, 0));
 
     params.push_back(std::make_unique<juce::AudioParameterBool>(
-        pid("midi_arp_sync_ppq"), "Arp Sync to Transport", true));
+        pid("midi_arp_sync_ppq"), "Arp Sync to Transport", false));
 
     for (int si = 0; si < 32; ++si)
     {

@@ -1,0 +1,9 @@
+{
+  "name": "Low Gravity",
+  "category": "Pads",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

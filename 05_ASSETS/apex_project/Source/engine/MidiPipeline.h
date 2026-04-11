@@ -137,7 +137,17 @@ private:
 
     Ptrs ptrs {};
     std::array<ArpStepPtrs, kArpSteps> arpStepPtrs {};
+    juce::AudioParameterFloat* arpRateParam = nullptr;
+    juce::AudioParameterFloat* arpSwingParam = nullptr;
+    std::array<juce::AudioParameterFloat*, kArpSteps> arpStepDurParams {};
     bool pointersBound = false;
+
+    /** PPQ phase snap only on arp enable — avoids fighting per-sample advance (MIDI zipper/static). */
+    bool lastProcessArpOn = false;
+
+    /** End-of-last-block PPQ (predicted) for transport jump detection when sync is on. */
+    double lastArpSyncPpq = 0.0;
+    bool arpSyncPpqPrimed = false;
 
     std::array<ChordMapSlot, kMaxMap> chordMaps {};
 
@@ -165,6 +175,8 @@ private:
     double arpGateSamplesLeft = 0;
 
     uint32_t arpRng = 0xC0FFEEu;
+    /** Advances only when an arp step actually fires (not skipped 32-step slots) — drives Up/Down/Order/Random. */
+    uint32_t arpNoteWalk = 0;
     int arpFullStepCount = 0;
     double currentSampleRate = 44100.0;
     std::array<uint8_t, kMaxChordTones> arpPolyHeld {};

@@ -42,6 +42,17 @@ WolfsDenAudioProcessor::WolfsDenAudioProcessor()
     (void)dbDir.createDirectory();
     theoryEngine.initialise(dbDir.getChildFile("theory.db"));
     syncTheoryParamsFromApvts();
+
+    // Factory WAVs live at …/Contents/Resources/Factory (CMake POST_BUILD copy)
+    {
+        const auto exe      = juce::File::getSpecialLocation (juce::File::currentExecutableFile);
+        const auto contents = exe.getParentDirectory().getParentDirectory();
+        factoryContentDir   = contents.getChildFile ("Resources").getChildFile ("Factory");
+        getSynthEngine().getSampleLibrary().setBundleFactoryDirectory (factoryContentDir);
+
+        // Seed the factory pack + 41 instrument presets on first launch (no-op thereafter)
+        theoryEngine.seedFactoryPresets (factoryContentDir);
+    }
 }
 
 WolfsDenAudioProcessor::~WolfsDenAudioProcessor()
@@ -188,6 +199,10 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
 
     drainUiToDspFifo();
 
+    // UI thread requested an immediate voice-kill (e.g. preset change)
+    if (pendingAllNotesOff.exchange(false, std::memory_order_acq_rel))
+        synthEngine.allNotesOff();
+
     bool playingInfo = false;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
@@ -289,6 +304,212 @@ juce::String WolfsDenAudioProcessor::getPresetDisplayName() const
     return presetDisplayName;
 }
 
+void WolfsDenAudioProcessor::setBrowseChordSetSelection(int chordSetDbId)
+{
+    const juce::ScopedLock sl(customStateLock);
+    browseChordSetId = chordSetDbId;
+    if (!theoryEngine.isDatabaseReady())
+        return;
+    for (const auto& r : theoryEngine.getChordSetListings())
+    {
+        if (r.id == chordSetDbId)
+        {
+            presetDisplayName = r.name.c_str();
+            return;
+        }
+    }
+}
+
+int WolfsDenAudioProcessor::getBrowseChordSetId() const
+{
+    const juce::ScopedLock sl(customStateLock);
+    return browseChordSetId;
+}
+
+void WolfsDenAudioProcessor::cycleBrowseChordSet(int delta)
+{
+    if (!theoryEngine.isDatabaseReady())
+        return;
+
+    std::vector<std::pair<int, juce::String>> rows;
+    for (const auto& r : theoryEngine.getChordSetListings())
+        rows.push_back({r.id, r.name.c_str()});
+    if (rows.empty())
+        return;
+
+    int curId = -1;
+    juce::String curName;
+    {
+        const juce::ScopedLock sl(customStateLock);
+        curId = browseChordSetId;
+        curName = presetDisplayName;
+    }
+
+    int idx = 0;
+    bool found = false;
+    for (int i = 0; i < (int) rows.size(); ++i)
+    {
+        if (rows[(size_t)i].first == curId)
+        {
+            idx = i;
+            found = true;
+            break;
+        }
+    }
+
+    if (!found)
+    {
+        for (int i = 0; i < (int) rows.size(); ++i)
+        {
+            if (rows[(size_t)i].second == curName)
+            {
+                idx = i;
+                found = true;
+                break;
+            }
+        }
+    }
+
+    idx += delta;
+    idx = (idx % (int)rows.size() + (int)rows.size()) % (int)rows.size();
+    setBrowseChordSetSelection(rows[(size_t)idx].first);
+}
+
+// =============================================================================
+// Patch preset system
+// =============================================================================
+
+int WolfsDenAudioProcessor::saveCurrentAsPreset (const juce::String& name,
+                                                   const juce::String& category)
+{
+    juce::MemoryBlock blob;
+    getStateInformation (blob);
+
+    const int newId = theoryEngine.savePreset (
+        name.toStdString(),
+        "User",
+        category.toStdString(),
+        "[]",   // tags — empty JSON array; future UI can populate
+        0,      // pack_id 0 = user preset (no pack)
+        blob.getData(),
+        (int) blob.getSize());
+
+    if (newId > 0)
+    {
+        const juce::ScopedLock sl (customStateLock);
+        presetDisplayName = name;
+        currentPresetId   = newId;
+    }
+    return newId;
+}
+
+bool WolfsDenAudioProcessor::loadPresetById (int presetId)
+{
+    if (!theoryEngine.isDatabaseReady()) return false;
+
+    const auto& list = theoryEngine.getPresetListings();
+    const auto  it   = std::find_if (list.begin(), list.end(),
+                                     [presetId](const wolfsden::PresetListing& p){ return p.id == presetId; });
+    if (it == list.end()) return false;
+
+    const wolfsden::PresetListing& preset = *it;
+
+    // Silence any currently playing voices before swapping the preset.
+    // The flag is consumed on the next audio-thread processBlock() call, which
+    // guarantees no race condition — allNotesOff() only ever runs on the audio thread.
+    pendingAllNotesOff.store(true, std::memory_order_release);
+
+    if (preset.isFactory)
+    {
+        // Recipe load: configure layer 0 for this instrument sample.
+        // All other layers/FX/Mod state are left as-is (instrument slot swap).
+        applyFactoryPreset (preset);
+    }
+    else
+    {
+        // Full state restore from binary blob.
+        const juce::MemoryBlock blob = theoryEngine.loadPresetBlob (presetId);
+        if (blob.getSize() == 0) return false;
+        setStateInformation (blob.getData(), (int) blob.getSize());
+    }
+
+    {
+        const juce::ScopedLock sl (customStateLock);
+        presetDisplayName = preset.name.c_str();
+        currentPresetId   = presetId;
+    }
+    return true;
+}
+
+void WolfsDenAudioProcessor::applyFactoryPreset (const wolfsden::PresetListing& preset)
+{
+    // Resolve the WAV path inside the bundle's Factory folder
+    const juce::File wavFile = factoryContentDir.getChildFile (preset.samplePath.c_str());
+
+    // Helper: set a RangedAudioParameter from its physical (unnormalized) value
+    auto setPhysical = [this](const juce::String& id, float physVal)
+    {
+        if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (id)))
+            p->setValueNotifyingHost (p->convertTo0to1 (physVal));
+    };
+
+    // Layer 0: switch oscillator mode to Sample (index 7)
+    // AudioParameterChoice stores choices 0-N; convertTo0to1(index) = index / (N-1)
+    if (auto* osc = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("layer0_osc_type")))
+        osc->setValueNotifyingHost (osc->convertTo0to1 (7));
+
+    // Layer 0 ADSR — physical seconds / linear values
+    setPhysical ("layer0_amp_attack",  preset.envAttack);
+    setPhysical ("layer0_amp_decay",   preset.envDecay);
+    setPhysical ("layer0_amp_sustain", preset.envSustain);
+    setPhysical ("layer0_amp_release", preset.envRelease);
+
+    // Load the sample into layer 0
+    if (wavFile.existsAsFile())
+    {
+        requestLayerSampleLoad (0,
+                                preset.id,
+                                wavFile.getFullPathName(),
+                                preset.rootNote,
+                                preset.loopEnabled,
+                                preset.oneShot);
+    }
+}
+
+void WolfsDenAudioProcessor::cyclePreset (int delta)
+{
+    if (!theoryEngine.isDatabaseReady()) return;
+    const auto& list = theoryEngine.getPresetListings();
+    if (list.empty()) return;
+
+    int curId = -1;
+    {
+        const juce::ScopedLock sl (customStateLock);
+        curId = currentPresetId;
+    }
+
+    // Find current index
+    int idx = 0;
+    for (int i = 0; i < (int) list.size(); ++i)
+    {
+        if (list[(size_t)i].id == curId)
+        {
+            idx = i;
+            break;
+        }
+    }
+
+    idx += delta;
+    idx = (idx % (int)list.size() + (int)list.size()) % (int)list.size();
+    loadPresetById (list[(size_t)idx].id);
+}
+
+int WolfsDenAudioProcessor::getCurrentPresetId() const noexcept
+{
+    const juce::ScopedLock sl (customStateLock);
+    return currentPresetId;
+}
+
 void WolfsDenAudioProcessor::setLastEditorBounds(int width, int height)
 {
     editorWidth.store(width, std::memory_order_relaxed);
@@ -303,8 +524,10 @@ void WolfsDenAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
     juce::ValueTree custom("CustomState");
     {
         const juce::ScopedLock sl(customStateLock);
-        custom.setProperty("presetName", presetDisplayName, nullptr);
-        custom.setProperty("chordData", chordProgressionBlob, nullptr);
+        custom.setProperty("presetName",      presetDisplayName,  nullptr);
+        custom.setProperty("browseChordSetId",browseChordSetId,   nullptr);
+        custom.setProperty("chordData",       chordProgressionBlob, nullptr);
+        custom.setProperty("currentPresetId", currentPresetId,    nullptr);
     }
     custom.setProperty("editorWidth", editorWidth.load(std::memory_order_relaxed), nullptr);
     custom.setProperty("editorHeight", editorHeight.load(std::memory_order_relaxed), nullptr);
@@ -335,8 +558,10 @@ void WolfsDenAudioProcessor::setStateInformation(const void* data, int sizeInByt
             if (auto custom = root.getChildWithName("CustomState"); custom.isValid())
             {
                 const juce::ScopedLock sl(customStateLock);
-                presetDisplayName = custom.getProperty("presetName").toString();
+                presetDisplayName    = custom.getProperty("presetName").toString();
+                browseChordSetId     = (int)custom.getProperty("browseChordSetId", -1);
                 chordProgressionBlob = custom.getProperty("chordData").toString();
+                currentPresetId      = (int)custom.getProperty("currentPresetId", -1);
                 editorWidth.store((int)custom.getProperty("editorWidth", 480), std::memory_order_relaxed);
                 editorHeight.store((int)custom.getProperty("editorHeight", 320), std::memory_order_relaxed);
             }

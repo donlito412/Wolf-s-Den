@@ -13,6 +13,16 @@ inline float readPtr(std::atomic<float>* ap, float defV = 0.f) noexcept
 {
     return ap ? ap->load(std::memory_order_relaxed) : defV;
 }
+
+inline int readChoiceIndex(std::atomic<float>* ap, int numItems, int defIdx) noexcept
+{
+    if (!ap || numItems < 2)
+        return defIdx;
+    const float n = ap->load(std::memory_order_relaxed);
+    if (n > 1.0001f)
+        return juce::jlimit(0, numItems - 1, (int)std::lround(n));
+    return juce::jlimit(0, numItems - 1, (int)(n * (float)numItems * 0.9999f));
+}
 } // namespace
 
 SynthEngine::SynthEngine() = default;
@@ -27,6 +37,12 @@ int SynthEngine::countActiveVoices() const noexcept
         ++n;
     }
     return n;
+}
+
+void SynthEngine::allNotesOff() noexcept
+{
+    for (auto& v : voices)
+        v.active = false;
 }
 
 void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvts)
@@ -108,8 +124,11 @@ void SynthEngine::prepare(double sr, int samplesPerBlock, juce::AudioProcessorVa
         v.active = false;
         v.age = 0;
         for (int L = 0; L < kNumLayers; ++L)
-            v.layers[(size_t)L].prepare(sr, wavetable.data(), kWtSize, granularBuffer.data(), kGranSize);
+            v.layers[(size_t)L].prepare(sr, wavetable.data(), kWtSize, granularBuffer.data(), kGranSize, maxBlock);
     }
+
+    // Kick off sample library scan (background thread, safe to call multiple times)
+    sampleLibrary.scanAsync();
 }
 
 void SynthEngine::reset() noexcept
@@ -330,7 +349,7 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
         lastFxDelayMixAdd = fxDel;
         lastFxChorusMixAdd = fxCho;
 
-        const int lfoShapeN = (int)readPtr(ptrs.lfoShape, 0.f);
+        const int lfoShapeN = readChoiceIndex(ptrs.lfoShape, 6, 0);
         globalLfo.setShape(juce::jlimit(0, 5, lfoShapeN));
         const float baseLfoDepth = readPtr(ptrs.lfoDepth, 0.5f);
         const float effLfoDepth = juce::jlimit(0.01f, 1.f, baseLfoDepth + lfoDepthAdd);
@@ -375,6 +394,22 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
             v.age += (uint32_t)numSamples;
 
     deactivateFinishedVoices();
+}
+
+void SynthEngine::loadLayerSample (int layerIndex, int sampleId, const juce::String& filePath,
+                                    int rootNoteMidi, bool loopEnabled, bool oneShot,
+                                    float startFrac, float endFrac)
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers)
+        return;
+
+    // One background thread loads all voices in order. Spawning N×Thread::launch (one per voice)
+    // races the same file + sample player swap state and crashes the audio thread.
+    juce::Thread::launch ([=] {
+        std::lock_guard<std::mutex> loadLock (layerSampleLoadMutex);
+        for (auto& v : voices)
+            v.layers[(size_t)layerIndex].loadSample (sampleId, filePath, rootNoteMidi, loopEnabled, oneShot, startFrac, endFrac);
+    });
 }
 
 } // namespace wolfsden

@@ -196,6 +196,9 @@ void FxEngine::prepare(double sr, int maxBlock, juce::AudioProcessorValueTreeSta
     sampleRate = sr;
     maxBlockSize = juce::jmax(1, maxBlock);
     bindPointers(state);
+    scratchLayerStereo.setSize(2, maxBlockSize, false, false, true);
+    scratchMixStereo.setSize(2, maxBlockSize, false, false, true);
+    scratchReverbWet.setSize(2, maxBlockSize, false, false, true);
     const uint32_t mb = (uint32_t)maxBlockSize;
     for (auto& s : slotDSPs)
         s->prepare(sr, mb);
@@ -282,9 +285,8 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
             const int maxPre = juce::jmax(2, st.revPreL.getMaximumDelayInSamples() - 1);
             const int preSamps = juce::jlimit(1, maxPre, (int)(sr * 0.001 * (double)preMs));
 
-            juce::AudioBuffer<float> wet(2, numSamples);
-            float* p0 = wet.getWritePointer(0);
-            float* p1 = wet.getWritePointer(1);
+            float* p0 = scratchReverbWet.getWritePointer(0);
+            float* p1 = scratchReverbWet.getWritePointer(1);
             for (int i = 0; i < numSamples; ++i)
             {
                 st.revPreL.pushSample(0, Lw[i]);
@@ -560,17 +562,19 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
     const int n = juce::jmin(layerBus.getNumSamples(), outStereo.getNumSamples());
     if (n < 1 || layerBus.getNumChannels() < 8 || outStereo.getNumChannels() < 1)
         return;
+    if (n > maxBlockSize)
+        return;
 
     cacheRoutingForBlock(apvtsRef);
 
-    juce::AudioBuffer<float> layerPair(2, n);
-    juce::AudioBuffer<float> mix(2, n);
-    mix.clear();
+    scratchMixStereo.clear(0, 0, n);
+    if (scratchMixStereo.getNumChannels() > 1)
+        scratchMixStereo.clear(1, 0, n);
 
     for (int L = 0; L < 4; ++L)
     {
-        layerPair.copyFrom(0, 0, layerBus, L * 2, 0, n);
-        layerPair.copyFrom(1, 0, layerBus, L * 2 + 1, 0, n);
+        scratchLayerStereo.copyFrom(0, 0, layerBus, L * 2, 0, n);
+        scratchLayerStereo.copyFrom(1, 0, layerBus, L * 2 + 1, 0, n);
 
         std::array<int, kFxSlotsPerRack> lt {};
         std::array<float, kFxSlotsPerRack> lm {};
@@ -579,10 +583,10 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
             lt[(size_t)s] = cachedLayerType[(size_t)(L * 4 + s)];
             lm[(size_t)s] = readAP(layerMixPtrs[(size_t)(L * 4 + s)], 0.f);
         }
-        processRack(layerPair, L * 4, lt, lm, n);
+        processRack(scratchLayerStereo, L * 4, lt, lm, n);
 
-        mix.addFrom(0, 0, layerPair, 0, 0, n);
-        mix.addFrom(1, 0, layerPair, 1, 0, n);
+        scratchMixStereo.addFrom(0, 0, scratchLayerStereo, 0, 0, n);
+        scratchMixStereo.addFrom(1, 0, scratchLayerStereo, 1, 0, n);
     }
 
     std::array<int, kFxSlotsPerRack> ct {};
@@ -599,7 +603,7 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
             base = juce::jlimit(0.f, 1.f, base + fxChorusMixAdd);
         cm[(size_t)c] = base;
     }
-    processRack(mix, 16, ct, cm, n);
+    processRack(scratchMixStereo, 16, ct, cm, n);
 
     std::array<int, kFxSlotsPerRack> mt {};
     std::array<float, kFxSlotsPerRack> mm {};
@@ -608,7 +612,7 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
         mt[(size_t)m] = cachedMasterType[(size_t)m];
         mm[(size_t)m] = readAP(masterMixPtrs[(size_t)m], 0.f);
     }
-    processRack(mix, 20, mt, mm, n);
+    processRack(scratchMixStereo, 20, mt, mm, n);
 
     outStereo.clear(0, 0, n);
     if (outStereo.getNumChannels() > 1)
@@ -616,20 +620,20 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
 
     if (outStereo.getNumChannels() > 1)
     {
-        outStereo.copyFrom(0, 0, mix, 0, 0, n);
-        outStereo.copyFrom(1, 0, mix, 1, 0, n);
+        outStereo.copyFrom(0, 0, scratchMixStereo, 0, 0, n);
+        outStereo.copyFrom(1, 0, scratchMixStereo, 1, 0, n);
     }
     else if (outStereo.getNumChannels() == 1)
     {
-        outStereo.copyFrom(0, 0, mix, 0, 0, n);
-        outStereo.addFrom(0, 0, mix, 1, 0, n);
+        outStereo.copyFrom(0, 0, scratchMixStereo, 0, 0, n);
+        outStereo.addFrom(0, 0, scratchMixStereo, 1, 0, n);
         outStereo.applyGain(0, 0, n, 0.5f); // Downmix stereo to mono
     }
     else
     {
         float* d = outStereo.getWritePointer(0);
         for (int i = 0; i < n; ++i)
-            d[i] = 0.5f * (mix.getSample(0, i) + mix.getSample(1, i));
+            d[i] = 0.5f * (scratchMixStereo.getSample(0, i) + scratchMixStereo.getSample(1, i));
     }
 }
 

@@ -9,7 +9,7 @@ namespace
 void styleKnob(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
-    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 48, 14);
+    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 20);
     s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentPrimary());
     s.setColour(juce::Slider::thumbColourId, Theme::accentHot());
 }
@@ -17,7 +17,7 @@ void styleKnob(juce::Slider& s)
 void styleH(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::LinearHorizontal);
-    s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 52, 16);
+    s.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 22);
 }
 } // namespace
 
@@ -108,13 +108,13 @@ void FxPage::ExpandedPanel::paint(juce::Graphics& g)
 void FxPage::ExpandedPanel::resized()
 {
     auto r = getLocalBounds().reduced(8, 4);
-    const int slotH = 22;
+    const int slotH = 24;
     for (int p = 0; p < 4; ++p)
     {
         if (!sliders[(size_t)p].isVisible()) continue;
-        labels[(size_t)p].setBounds(r.removeFromTop(12));
+        labels[(size_t)p].setBounds(r.removeFromTop(15));
         sliders[(size_t)p].setBounds(r.removeFromTop(slotH));
-        r.removeFromTop(2);
+        r.removeFromTop(3);
     }
 }
 
@@ -429,7 +429,7 @@ void FxPage::resized()
         auto top = slotR.removeFromTop(kCollapsedH);
         slots[(size_t)i]->onOff.setBounds(top.removeFromLeft(40).reduced(4, 12));
         slots[(size_t)i]->lab.setBounds(top.removeFromLeft(60).reduced(2, 14));
-        slots[(size_t)i]->type.setBounds(top.removeFromLeft(juce::jmax(140, top.getWidth() / 2)).reduced(2, 10));
+        slots[(size_t)i]->type.setBounds(top.removeFromLeft(juce::jmax(220, top.getWidth() * 55 / 100)).reduced(2, 8));
         slots[(size_t)i]->expandBtn.setBounds(top.removeFromRight(36).reduced(4, 12));
         slots[(size_t)i]->mix.setBounds(top.reduced(4, 2));
 

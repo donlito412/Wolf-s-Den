@@ -1,0 +1,9 @@
+{
+  "name": "Broken Cello",
+  "category": "Strings",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

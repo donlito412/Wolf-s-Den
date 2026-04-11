@@ -1,0 +1,9 @@
+{
+  "name": "Grand Ivory",
+  "category": "Keys",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

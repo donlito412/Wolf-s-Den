@@ -57,6 +57,42 @@ struct ChordSetListing
     int scaleId = 0;
 };
 
+/** One row from `packs` — a factory or expansion content pack. */
+struct PackListing
+{
+    int id = 0;
+    std::string name;        // "Wolf's Den Factory"
+    std::string author;      // "Wolf Productions"
+    std::string version;     // "1.0"
+    std::string contentPath; // absolute path to WAV root (may be empty for built-in)
+};
+
+/**
+ * One row from `presets` joined with `packs`.
+ * Factory presets (isFactory == true) are recipe-based: the plugin applies
+ * sample + envelope settings programmatically when loaded.
+ * User presets (isFactory == false) carry a full APVTS+ModMatrix binary blob.
+ */
+struct PresetListing
+{
+    int id = 0;
+    std::string name;
+    std::string author;
+    std::string category;        // "Bass" | "Keys" | "Leads" | "Pads" | "Plucks" | "Strings" | "Horns" | "Woodwinds" | "User"
+    std::string tags;            // JSON array, e.g. ["dark","trap"]
+    int packId = 0;
+    std::string packName;        // joined from packs
+    std::string samplePath;      // relative to pack content dir, e.g. "Keys/Rhodes.wav"
+    int rootNote = 60;           // MIDI root for sample mapping
+    bool loopEnabled = true;
+    bool oneShot = false;
+    float envAttack  = 0.005f;   // seconds
+    float envDecay   = 0.3f;
+    float envSustain = 0.8f;
+    float envRelease = 0.4f;
+    bool isFactory = false;      // true → state_blob is NULL; load via recipe
+};
+
 /** Pitch-class set: 12 slots indexed C=0 .. B=11 */
 using PitchClassSet = std::array<bool, 12>;
 
@@ -199,8 +235,47 @@ public:
     const std::vector<ChordDefinition>& getChordDefinitions() const noexcept { return chordDefs; }
     const std::vector<ScaleDefinition>& getScaleDefinitions() const noexcept { return scaleDefs; }
     const std::vector<ChordSetListing>& getChordSetListings() const noexcept { return chordSetList; }
+    const std::vector<PresetListing>&   getPresetListings()   const noexcept { return presetList; }
+    const std::vector<PackListing>&     getPackListings()     const noexcept { return packList; }
     int getChordCount() const noexcept { return static_cast<int> (chordDefs.size()); }
     int getScaleCount() const noexcept { return static_cast<int> (scaleDefs.size()); }
+
+    // =========================================================================
+    // Preset system  (message thread)
+    // =========================================================================
+
+    /**
+     * Seed the factory pack and 41 WAV-backed presets into the DB if not already
+     * present.  contentDir should point to the bundle's Resources/Factory folder.
+     * Safe to call every launch — is a no-op after first run.
+     */
+    void seedFactoryPresets (const juce::File& contentDir);
+
+    /** Reload preset and pack listings from the DB (call after save/delete). */
+    void reloadPresetListings();
+
+    /**
+     * Save the current plugin state as a named user preset.
+     * blob/blobSize come from PluginProcessor::getStateInformation().
+     * Returns the new row's id, or -1 on failure.
+     */
+    int savePreset (const std::string& name,
+                    const std::string& author,
+                    const std::string& category,
+                    const std::string& tags,
+                    int packId,
+                    const void* blob,
+                    int blobSize);
+
+    /**
+     * Load the binary state blob for a user preset.
+     * Returns an empty MemoryBlock if the preset is factory-based (isFactory)
+     * or if the id is invalid.
+     */
+    juce::MemoryBlock loadPresetBlob (int presetId) const;
+
+    /** Permanently remove a user preset (factory presets cannot be deleted). */
+    void deletePreset (int presetId);
 
 private:
     // =========================================================================
@@ -209,11 +284,13 @@ private:
 
     bool openDatabase   (const juce::File& dbFile);
     void closeDatabase  () noexcept;
-    void createSchema   ();                  ///< CREATE TABLE IF NOT EXISTS
-    void seedDatabase   ();                  ///< populate tables when empty
+    void createSchema   ();                  ///< CREATE TABLE IF NOT EXISTS (incl. migration)
+    void seedDatabase   ();                  ///< populate chord/scale tables when empty
     void loadChordDefinitions ();
     void loadScaleDefinitions ();
     void loadChordSetListings ();
+    void loadPresetListings   ();
+    void loadPackListings     ();
 
     static std::vector<int> parseIntervalJson (const std::string& json);
     static std::string      buildIntervalJson  (const std::vector<int>& iv);
@@ -263,6 +340,8 @@ private:
     std::vector<ChordDefinition> chordDefs;
     std::vector<ScaleDefinition> scaleDefs;
     std::vector<ChordSetListing> chordSetList;
+    std::vector<PresetListing>   presetList;
+    std::vector<PackListing>     packList;
 
     // =========================================================================
     // Audio ring-buffer  (DSP thread → bg thread, lock-free SPSC)

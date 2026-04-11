@@ -196,9 +196,8 @@ void WolfsDenLookAndFeel::drawComboBox(juce::Graphics& g,
     g.setColour(Theme::textDisabled());
     g.drawRoundedRectangle(r, 4.f, 1.f);
 
-    g.setColour(Theme::textPrimary());
-    g.setFont(Theme::fontValue());
-    g.drawFittedText(box.getText(), r.reduced(6.f, 0.f).toNearestInt(), juce::Justification::centredLeft, 2);
+    // Do not draw the item text here — ComboBox paints its internal Label on top; drawing
+    // here too stacks two strings (FX / Mod / Browse looked “double”).
 
     juce::Path p;
     p.addTriangle(r.getRight() - 14.f, r.getCentreY() - 2.f, r.getRight() - 6.f, r.getCentreY() - 2.f, r.getRight() - 10.f, r.getCentreY() + 4.f);
@@ -211,6 +210,12 @@ juce::Font WolfsDenLookAndFeel::getLabelFont(juce::Label& label)
     if (label.getFont().getHeight() > 0.1f)
         return label.getFont();
     return Theme::fontLabel();
+}
+
+juce::Font WolfsDenLookAndFeel::getComboBoxFont(juce::ComboBox& box)
+{
+    juce::ignoreUnused(box);
+    return Theme::fontValue();
 }
 
 // =============================================================================

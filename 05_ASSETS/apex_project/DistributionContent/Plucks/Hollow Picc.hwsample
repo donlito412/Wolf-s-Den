@@ -1,0 +1,9 @@
+{
+  "name": "Hollow Picc",
+  "category": "Plucks",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

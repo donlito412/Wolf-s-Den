@@ -1,0 +1,9 @@
+{
+  "name": "Cold Arco",
+  "category": "Strings",
+  "packId": "factory",
+  "rootNote": 60,
+  "isOneShot": false,
+  "isLoop": false,
+  "bpm": 0
+}

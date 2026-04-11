@@ -61,6 +61,7 @@ public:
                       juce::ComboBox& box) override;
 
     juce::Font getLabelFont(juce::Label& label) override;
+    juce::Font getComboBoxFont(juce::ComboBox& box) override;
 
 private:
     /** Per-component hover state for the 80ms fade animation. */

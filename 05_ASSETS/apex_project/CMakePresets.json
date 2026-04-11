@@ -1,0 +1,21 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release-ship",
+      "configurePreset": "release",
+      "displayName": "Ship plug-ins (VST3+AU+Standalone → Products + ~/Library)",
+      "targets": ["WolfsDen_ship"]
+    }
+  ]
+}

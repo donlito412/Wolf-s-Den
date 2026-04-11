@@ -10,6 +10,9 @@ namespace wolfsden
 namespace
 {
 
+/** Baked into binary so you can verify the DAW loaded this build: `strings … | grep wd_midi_arp` */
+[[maybe_unused]] constexpr char kMidiPipelineBuildTag[] = "wd_midi_arp_20260410";
+
 inline float readAP(std::atomic<float>* p, float d = 0.f) noexcept
 {
     return p ? p->load(std::memory_order_relaxed) : d;
@@ -149,6 +152,8 @@ void MidiPipeline::prepare(double sampleRate, int maxBlock, juce::AudioProcessor
 
 void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
 {
+    arpRateParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_rate"));
+    arpSwingParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_swing"));
     ptrs.keysLockMode = apvts.getRawParameterValue("midi_keys_lock_mode");
     ptrs.chordMode = apvts.getRawParameterValue("midi_chord_mode");
     ptrs.chordType = apvts.getRawParameterValue("theory_chord_type");
@@ -169,6 +174,7 @@ void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
         arpStepPtrs[(size_t)si].dur = apvts.getRawParameterValue(pfx + "dur");
         arpStepPtrs[(size_t)si].trn = apvts.getRawParameterValue(pfx + "trn");
         arpStepPtrs[(size_t)si].rkt = apvts.getRawParameterValue(pfx + "rkt");
+        arpStepDurParams[(size_t)si] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(pfx + "dur"));
     }
     pointersBound = true;
 }
@@ -199,7 +205,14 @@ float MidiPipeline::readStepDur(int stepIndex) const noexcept
     auto* p = arpStepPtrs[(size_t)stepIndex].dur;
     if (!p)
         return 1.f;
-    const float n = readAP(p, (1.f - 0.1f) / 1.9f);
+    const float n = readAP(p, 0.5f);
+    if (auto* pf = arpStepDurParams[(size_t)stepIndex])
+    {
+        const auto r = pf->getNormalisableRange();
+        if (n > 1.0001f)
+            return juce::jlimit(r.start, r.end, n);
+        return juce::jlimit(r.start, r.end, pf->convertFrom0to1(n));
+    }
     return juce::jlimit(0.1f, 2.f, 0.1f + n * 1.9f);
 }
 
@@ -252,6 +265,10 @@ void MidiPipeline::reset() noexcept
     for (auto& p : physicalHeld)
         p = false;
     lastLatch = false;
+    lastProcessArpOn = false;
+    lastArpSyncPpq = 0.0;
+    arpSyncPpqPrimed = false;
+    arpNoteWalk = 0;
 }
 
 int MidiPipeline::readKeysLockMode() const noexcept
@@ -282,7 +299,18 @@ bool MidiPipeline::readArpOn() const noexcept
 
 float MidiPipeline::readArpRate() const noexcept
 {
-    return readAP(ptrs.arpRate, 4.f);
+    if (!ptrs.arpRate)
+        return 4.f;
+    const float n = readAP(ptrs.arpRate, 0.5f);
+    if (arpRateParam != nullptr)
+    {
+        const auto r = arpRateParam->getNormalisableRange();
+        // APVTS raw is usually normalized 0..1; treat n > 1 as already physical (compat / odd hosts).
+        if (n > 1.0f)
+            return juce::jlimit(r.start, r.end, n);
+        return juce::jlimit(r.start, r.end, arpRateParam->convertFrom0to1(n));
+    }
+    return juce::jlimit(0.25f, 32.f, n);
 }
 
 MidiPipeline::ArpPattern MidiPipeline::readArpPattern() const noexcept
@@ -297,7 +325,15 @@ bool MidiPipeline::readArpLatch() const noexcept
 
 float MidiPipeline::readArpSwing() const noexcept
 {
-    return juce::jlimit(0.f, 0.5f, readAP(ptrs.arpSwing, 0.f));
+    const float n = readAP(ptrs.arpSwing, 0.f);
+    if (arpSwingParam != nullptr)
+    {
+        const auto r = arpSwingParam->getNormalisableRange();
+        if (n > 1.0001f)
+            return juce::jlimit(r.start, r.end, n);
+        return juce::jlimit(r.start, r.end, arpSwingParam->convertFrom0to1(n));
+    }
+    return juce::jlimit(0.f, 0.5f, n * 0.5f);
 }
 
 int MidiPipeline::readArpOctaves() const noexcept
@@ -506,7 +542,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     const int vel = juce::jlimit(1, 127, (int)(vel01 * (float)readStepVel(step)));
     const float vNorm = (float)vel / 127.f;
     const int nOct = juce::jmax(1, readArpOctaves());
-    const int octShift = (arpFullStepCount % nOct) * 12;
+    const int octShift = (int)(((uint32_t)arpNoteWalk % (uint32_t)nOct) * 12u);
     const int trn = readStepTrn(step);
 
     if (pat == ArpPattern::Chord)
@@ -527,18 +563,19 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
         {
             arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
             ++arpFullStepCount;
+            ++arpNoteWalk;
         }
         return;
     }
 
     if (pat == ArpPattern::Up)
-        noteIdx = arpPatternIndex % nNotes;
+        noteIdx = (int)(arpNoteWalk % (uint32_t)juce::jmax(1, nNotes));
     else if (pat == ArpPattern::Down)
-        noteIdx = nNotes - 1 - (arpPatternIndex % nNotes);
+        noteIdx = nNotes - 1 - (int)(arpNoteWalk % (uint32_t)juce::jmax(1, nNotes));
     else if (pat == ArpPattern::UpDown)
     {
         const int cycleLen = nNotes > 1 ? (nNotes * 2 - 2) : 1;
-        int pos = arpPatternIndex % cycleLen;
+        int pos = (int)(arpNoteWalk % (uint32_t)juce::jmax(1, cycleLen));
         if (pos < nNotes)
             noteIdx = pos;
         else
@@ -549,7 +586,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     {
         if (pressCount > 0)
         {
-            const uint8_t want = pressOrder[(size_t)(arpPatternIndex % pressCount)];
+            const uint8_t want = pressOrder[(size_t)(arpNoteWalk % (uint32_t)pressCount)];
             noteIdx = 0;
             for (int i = 0; i < nNotes; ++i)
                 if (arpSorted[(size_t)i] == want)
@@ -588,6 +625,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     {
         arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
         ++arpFullStepCount;
+        ++arpNoteWalk;
     }
 }
 
@@ -617,19 +655,70 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
     const double stepsPerSecond = beatsPerSecond * (double)stepsPerBeat;
     samplesPerArpStep = stepsPerSecond > 1.0e-6 ? sampleRate / stepsPerSecond : sampleRate;
 
-    if (readAP(ptrs.arpSyncPpq, 1.f) > 0.5f && playHead != nullptr)
+    double ppqBlockStart = 0.0;
+    bool ppqValid = false;
+    if (playHead != nullptr)
         if (const auto pos = playHead->getPosition())
             if (const auto oPpq = pos->getPpqPosition())
             {
-                const double ppq = *oPpq;
-                const double stepBeats = 1.0 / (double)stepsPerBeat;
-                if (stepBeats > 1e-12)
-                {
-                    const double phase01 = std::fmod(std::abs(ppq), stepBeats) / stepBeats;
-                    arpTimeInStep = phase01 * samplesPerArpStep;
-                    lastRatchetSubIdx = -1;
-                }
+                ppqBlockStart = *oPpq;
+                ppqValid = true;
             }
+
+    bool hostPlaying = true;
+    if (playHead != nullptr)
+        if (const auto pos = playHead->getPosition())
+            hostPlaying = pos->getIsPlaying();
+
+    const bool syncWants = readAP(ptrs.arpSyncPpq, 1.f) > 0.5f;
+    const bool syncActive = arpOn && syncWants && ppqValid;
+    /** PPQ phase uses uniform beat subdivisions; odd-step swing lengthens steps and fights that — disable stretch when locked to transport. */
+    const bool arpSwingAffectsStepLen = !(syncWants && ppqValid);
+
+    // Transport-locked arp (host-style): stay on the musical grid without per-buffer hard snaps
+    // (those caused zipper noise). Soft nudge fixes drift; hard snap only on enable, big drift, or PPQ jumps.
+    if (syncActive)
+    {
+        const double stepBeats = 1.0 / (double)stepsPerBeat;
+        if (stepBeats > 1e-12)
+        {
+            const double phase01 = std::fmod(std::abs(ppqBlockStart), stepBeats) / stepBeats;
+            const double ideal = phase01 * samplesPerArpStep;
+            double err = ideal - arpTimeInStep;
+            const double period = samplesPerArpStep;
+            while (err > period * 0.5)
+                err -= period;
+            while (err < -period * 0.5)
+                err += period;
+
+            bool hardSnap = !lastProcessArpOn;
+
+            if (hostPlaying && arpSyncPpqPrimed)
+            {
+                const double predictedPpq = lastArpSyncPpq;
+                if (std::abs(ppqBlockStart - predictedPpq) > 0.22)
+                    hardSnap = true;
+            }
+
+            constexpr double kHardFrac = 0.34;
+            constexpr double kHardMinSamples = 56.0;
+            const double hardThresh = juce::jmax(kHardMinSamples, kHardFrac * samplesPerArpStep);
+            if (std::abs(err) > hardThresh)
+                hardSnap = true;
+
+            if (hardSnap)
+            {
+                arpTimeInStep = ideal;
+                lastRatchetSubIdx = -1;
+            }
+            else if (hostPlaying && std::abs(err) > 1.0e-4)
+            {
+                constexpr double kSoftGain = 0.22;
+                constexpr double kSoftCap = 9.0;
+                arpTimeInStep += juce::jlimit(-kSoftCap, kSoftCap, err * kSoftGain);
+            }
+        }
+    }
 
     std::array<int, 128> scaleTable {};
     theory.getScaleLookupTable(scaleTable);
@@ -833,7 +922,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 const int si = arpPatternIndex % kArpSteps;
                 const float swing = readArpSwing();
                 double stepLen = samplesPerArpStep;
-                if ((si & 1) != 0 && swing > 0.f)
+                if (arpSwingAffectsStepLen && (si & 1) != 0 && swing > 0.f)
                     stepLen *= 1.0 + (double)swing;
 
                 const double prevT = arpTimeInStep;
@@ -864,12 +953,23 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
             {
                 allNotesOffOutput(out, s);
                 arpTimeInStep = 0;
+                arpNoteWalk = 0;
             }
         }
     }
 
     midi.clear();
     midi.addEvents(out, 0, numSamples, 0);
+
+    if (arpOn && syncWants && ppqValid && hostPlaying)
+    {
+        lastArpSyncPpq = ppqBlockStart + (double)numSamples / sampleRate * beatsPerSecond;
+        arpSyncPpqPrimed = true;
+    }
+    else if (!arpOn || !syncWants || !ppqValid || !hostPlaying)
+        arpSyncPpqPrimed = false;
+
+    lastProcessArpOn = arpOn;
 }
 
 } // namespace wolfsden

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SynthDSP.h"
+#include "../samples/WDSamplePlayer.h"
 
 #include <array>
 #include <atomic>
@@ -44,10 +45,20 @@ struct ParamPointers
 class VoiceLayer
 {
 public:
-    void prepare(double sampleRate, const double* wavetable, int wavetableSize, const double* granularSource, int granularSize) noexcept;
+    void prepare(double sampleRate, const double* wavetable, int wavetableSize, const double* granularSource, int granularSize, int maxBlockSize = 512) noexcept;
     void reset() noexcept;
     void noteOn(int midiNote, float velocity) noexcept;
     void noteOff() noexcept;
+
+    /** Load a sample into this layer's WDSamplePlayer (call from a single worker thread — see SynthEngine::loadLayerSample). */
+    void loadSample (int sampleId, const juce::String& filePath,
+                     int rootNoteMidi, bool loopEnabled, bool oneShot,
+                     float startFrac = 0.f, float endFrac = 1.f)
+    {
+        samplePlayer.loadNow (sampleId, filePath, rootNoteMidi, loopEnabled, oneShot, startFrac, endFrac);
+    }
+
+    int currentSampleId() const noexcept { return samplePlayer.loadedId(); }
 
     /** Sum stereo into L/R (accumulate).
      *
@@ -124,6 +135,8 @@ private:
 
     float lastAmpEnvOut = 0.f;
     float lastFiltEnvOut = 0.f;
+
+    WDSamplePlayer samplePlayer;
 
     void updateAdsrTargets(int layerIndex, const ParamPointers& p) noexcept;
     double readWavetable(double phase01) const noexcept;

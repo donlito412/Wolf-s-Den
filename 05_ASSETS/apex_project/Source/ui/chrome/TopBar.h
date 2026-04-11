@@ -19,6 +19,8 @@ public:
     ~TopBar() override;
 
     std::function<void(int pageIndex)> onSelectPage;
+    /** Fired after < > cycles to a new preset; UI should sync card selection. */
+    std::function<void()> onPresetNavigate;
 
     void paint(juce::Graphics& g) override;
     void resized() override;

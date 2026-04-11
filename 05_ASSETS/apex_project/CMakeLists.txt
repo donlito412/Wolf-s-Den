@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(WolfsDen VERSION 1.0.3 LANGUAGES C CXX)
+project(WolfsDen VERSION 1.0.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,6 +41,7 @@ juce_add_plugin(
     BUNDLE_ID com.wolfproductions.wolfsden
     PLUGIN_MANUFACTURER_CODE WLFD
     PLUGIN_CODE WfDn
+    VERSION ${PROJECT_VERSION}
     FORMATS ${WOLFS_DEN_PLUGIN_FORMATS}
     PRODUCT_NAME "Wolf's Den"
     IS_SYNTH TRUE
@@ -53,9 +54,18 @@ juce_add_plugin(
     AU_MAIN_TYPE kAudioUnitType_MusicDevice
 )
 
-# Mirror installable artefacts under apex_project/Products for quick testing (JUCE also installs to ~/Library when COPY_PLUGIN_AFTER_BUILD is TRUE).
-# cmake -P avoids shell quoting issues (e.g. paths with apostrophes).
-set(WOLFS_DEN_COPY_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyProductBundle.cmake")
+message(
+    STATUS
+    "Wolf's Den: run cmake --build with target WolfsDen_ship (or WolfsDen_VST3). "
+    "Target WolfsDen is JUCE shared code only — it does not produce or redeploy the .vst3."
+)
+
+# One deploy step per format: merge DistributionContent into the built bundle, then copy the *complete*
+# bundle to apex_project/Products/ AND to ~/Library/Audio/Plug-Ins/ (same bits in both places).
+# JUCE COPY_PLUGIN_AFTER_BUILD still runs first; this overwrites those installs with the final bundle.
+set(WOLFS_DEN_DEPLOY_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployWolfsDenPlugin.cmake")
+set(WOLFS_DEN_FACTORY_SAMPLES "${CMAKE_CURRENT_SOURCE_DIR}/DistributionContent")
+
 if(APPLE)
     if(TARGET WolfsDen_VST3)
         add_custom_command(
@@ -63,10 +73,13 @@ if(APPLE)
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WOLFS_DEN_PRODUCTS_DIR}"
             COMMAND
-                ${CMAKE_COMMAND} "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_VST3>"
-                "-DDST=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.vst3" -P
-                "${WOLFS_DEN_COPY_SCRIPT}"
-            COMMENT "Wolf's Den: VST3 -> Products/"
+                ${CMAKE_COMMAND}
+                "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_VST3>"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.vst3"
+                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Wolf's Den.vst3"
+                "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
+                -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
+            COMMENT "Wolf's Den: VST3 -> Products/ + ~/Library/Audio/Plug-Ins/VST3/"
             VERBATIM
         )
     endif()
@@ -76,10 +89,13 @@ if(APPLE)
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WOLFS_DEN_PRODUCTS_DIR}"
             COMMAND
-                ${CMAKE_COMMAND} "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AU>"
-                "-DDST=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.component" -P
-                "${WOLFS_DEN_COPY_SCRIPT}"
-            COMMENT "Wolf's Den: AU -> Products/"
+                ${CMAKE_COMMAND}
+                "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AU>"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.component"
+                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/Components/Wolf's Den.component"
+                "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
+                -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
+            COMMENT "Wolf's Den: AU -> Products/ + ~/Library/Audio/Plug-Ins/Components/"
             VERBATIM
         )
     endif()
@@ -89,9 +105,12 @@ if(APPLE)
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WOLFS_DEN_PRODUCTS_DIR}"
             COMMAND
-                ${CMAKE_COMMAND} "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_Standalone>"
-                "-DDST=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.app" -P
-                "${WOLFS_DEN_COPY_SCRIPT}"
+                ${CMAKE_COMMAND}
+                "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_Standalone>"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.app"
+                "-DDST_USER="
+                "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
+                -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
             COMMENT "Wolf's Den: Standalone -> Products/"
             VERBATIM
         )
@@ -102,13 +121,40 @@ if(APPLE)
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WOLFS_DEN_PRODUCTS_DIR}"
             COMMAND
-                ${CMAKE_COMMAND} "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AAX>"
-                "-DDST=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.aaxplugin" -P
-                "${WOLFS_DEN_COPY_SCRIPT}"
+                ${CMAKE_COMMAND}
+                "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AAX>"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.aaxplugin"
+                "-DDST_USER="
+                "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
+                -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
             COMMENT "Wolf's Den: AAX -> Products/"
             VERBATIM
         )
     endif()
+endif()
+
+# -----------------------------------------------------------------------------
+# Ship target — IDE / CMake Tools often default to building "WolfsDen", which is
+# JUCE *shared code only* (no .vst3 / .component). Deploy POST_BUILD hooks live on
+# WolfsDen_VST3 / WolfsDen_AU / WolfsDen_Standalone. Building those (or this) is
+# what actually refreshes ~/Library and Products/.
+# -----------------------------------------------------------------------------
+set(WOLFS_DEN_SHIP_DEPS "")
+if(TARGET WolfsDen_VST3)
+    list(APPEND WOLFS_DEN_SHIP_DEPS WolfsDen_VST3)
+endif()
+if(TARGET WolfsDen_AU)
+    list(APPEND WOLFS_DEN_SHIP_DEPS WolfsDen_AU)
+endif()
+if(TARGET WolfsDen_Standalone)
+    list(APPEND WOLFS_DEN_SHIP_DEPS WolfsDen_Standalone)
+endif()
+if(WOLFS_DEN_SHIP_DEPS)
+    add_custom_target(
+        WolfsDen_ship
+        DEPENDS ${WOLFS_DEN_SHIP_DEPS}
+        COMMENT "Wolf's Den: ship plug-ins to Products/ + user plug-in folders (build this target)"
+    )
 endif()
 
 target_sources(
@@ -124,6 +170,8 @@ target_sources(
         Source/engine/TheoryEngine.cpp
         Source/engine/MidiPipeline.cpp
         Source/engine/FxEngine.cpp
+        Source/engine/samples/WDSampleLibrary.cpp
+        Source/engine/samples/WDSamplePlayer.cpp
         Source/ui/MainComponent.cpp
         Source/ui/PerfXyPad.cpp
         Source/ui/theme/UITheme.cpp
@@ -132,6 +180,7 @@ target_sources(
         Source/ui/chrome/BottomBar.cpp
         Source/ui/pages/BrowsePage.cpp
         Source/ui/pages/SynthPage.cpp
+        Source/ui/pages/WDSampleBrowserOverlay.cpp
         Source/ui/pages/PerformPage.cpp
         Source/ui/pages/FxPage.cpp
         Source/ui/pages/TheoryPage.cpp
@@ -184,6 +233,8 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source" PREFIX "Source" FILES
     Source/engine/TheoryEngine.cpp
     Source/engine/MidiPipeline.cpp
     Source/engine/FxEngine.cpp
+    Source/engine/samples/WDSampleLibrary.cpp
+    Source/engine/samples/WDSamplePlayer.cpp
     Source/ui/MainComponent.cpp
     Source/ui/PerfXyPad.cpp
     Source/ui/theme/UITheme.cpp
@@ -192,6 +243,7 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source" PREFIX "Source" FILES
     Source/ui/chrome/BottomBar.cpp
     Source/ui/pages/BrowsePage.cpp
     Source/ui/pages/SynthPage.cpp
+    Source/ui/pages/WDSampleBrowserOverlay.cpp
     Source/ui/pages/PerformPage.cpp
     Source/ui/pages/FxPage.cpp
     Source/ui/pages/TheoryPage.cpp
