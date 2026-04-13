@@ -28,6 +28,28 @@ Status: READY
 
 ---
 
+[2026-04-12]
+
+Agent: Cursor
+Task: TASK_002 — Full completion (CMake CTest wire-up + verified build + report)
+Output: /03_OUTPUTS/002_project_setup_report.md; /05_ASSETS/apex_project/CMakeLists.txt (`add_subdirectory(Tests)`); Tests/SmokeTest + CTest WolfsDen_Smoke
+Details: `WolfsDen_ship` + `WolfsDenTests` Release build PASS; `ctest` 1/1 PASS; `auval -v aumu WfDn WLFD` PASS. Report rewritten: deliverable checklist, Howling Wolves paths, real tree, ADD deviations, TASK_002 silence/minimal-UI constraint scoped to scaffold vs later tasks.
+Next Step: TASK_003 audit or next incomplete task per user order
+Status: DONE
+
+---
+
+[2026-04-12]
+
+Agent: Cursor
+Task: TASK_001 — Closure audit (deliverable crosswalk in ADD)
+Output: /03_OUTPUTS/001_architecture_design_document.md (§10 + TOC; v1.1)
+Details: Formal mapping of every TASK_001.md deliverable to ADD sections; explicit scope boundary (implementation/QA in TASK_002–010, not TASK_001).
+Next Step: Continue strict in-order work from first task whose spec/report/code still disagree (user workflow: finish each task fully before advancing).
+Status: DONE
+
+---
+
 [2026-04-09]
 
 Agent: Claude
@@ -253,3 +275,14 @@ Output: `/03_OUTPUTS/010_integration_test_report.md`
 Details: Ran Release `WolfsDen_ship` on `05_ASSETS/apex_project/build3` (zero errors). Filled checklist honestly: build PASS; preset/chord UI and DB paths CODE/PASS where statically verifiable; DAW/audio/CPU/1h crash items NOT RUN in agent environment. Open issues logged in report: no UndoManager (FAIL vs checklist), editor size not restored from saved state (FAIL). TASK_010 remains PENDING until all checklist items PASS per task constraints.
 Next Step: User runs DAW/M1 tests; address BUG_INT_001/BUG_INT_002 if full PASS required; then mark TASK_010 DONE
 Status: (TASK_010 file) PENDING
+
+---
+
+[2026-04-10]
+
+Agent: Cursor
+Task: TASK_010 — integration fix (FxEngine APVTS float denormalization)
+Output: `05_ASSETS/apex_project/Source/engine/FxEngine.{h,cpp}`; `03_OUTPUTS/010_integration_test_report.md` (BUG_INT_004)
+Details: FX mix + EQ dB now use `convertFrom0to1` via cached `AudioParameterFloat*`. `WolfsDen_ship` PASS.
+Next Step: Continue TASK_010 checklist in host
+Status: IN PROGRESS (TASK_010 still PENDING until full checklist PASS)

@@ -33,7 +33,8 @@ public:
                  int numSamples,
                  double sampleRate,
                  juce::AudioPlayHead* playHead,
-                 const TheoryEngine& theory) noexcept;
+                 const TheoryEngine& theory,
+                 juce::AudioProcessorValueTreeState& apvts) noexcept;
 
 private:
     struct Ptrs
@@ -41,6 +42,9 @@ private:
         std::atomic<float>* keysLockMode = nullptr;
         std::atomic<float>* chordMode = nullptr;
         std::atomic<float>* chordType = nullptr;
+        std::atomic<float>* chordRootAnchor = nullptr;
+        std::atomic<float>* chordOctaveShift = nullptr;
+        std::atomic<float>* chordDensity = nullptr;
         std::atomic<float>* chordInversion = nullptr;
         std::atomic<float>* arpOn = nullptr;
         std::atomic<float>* arpRate = nullptr;
@@ -89,6 +93,9 @@ private:
     int readKeysLockMode() const noexcept;
     bool readChordMode() const noexcept;
     int readChordTypeIndex() const noexcept;
+    int readChordRootAnchor() const noexcept;
+    int readChordOctaveShift() const noexcept;
+    int readChordDensity() const noexcept;
     int readChordInversion() const noexcept;
     bool readArpOn() const noexcept;
     float readArpRate() const noexcept;
@@ -123,8 +130,8 @@ private:
     void fireArpStep(juce::MidiBuffer& out,
                      int samplePos,
                      int stepIndex,
-                     float stepVelocity01,
                      float gate01,
+                     double stepLenSamples,
                      double gateScaleMul,
                      double sampleRate,
                      bool advanceSequencer) noexcept;
@@ -139,6 +146,7 @@ private:
     std::array<ArpStepPtrs, kArpSteps> arpStepPtrs {};
     juce::AudioParameterFloat* arpRateParam = nullptr;
     juce::AudioParameterFloat* arpSwingParam = nullptr;
+    juce::AudioParameterChoice* arpPatternChoice = nullptr;
     std::array<juce::AudioParameterFloat*, kArpSteps> arpStepDurParams {};
     bool pointersBound = false;
 

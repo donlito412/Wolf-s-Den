@@ -189,6 +189,7 @@ public:
 
     enum class DetectionMode { Midi, Audio };
     void setDetectionMode (DetectionMode mode) noexcept;
+    DetectionMode getDetectionMode() const noexcept;
 
     // =========================================================================
     // Detection results  (safe from any thread — reads atomics)

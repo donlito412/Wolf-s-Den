@@ -230,6 +230,13 @@ void TheoryEngine::setDetectionMode (DetectionMode mode) noexcept
     detectionModeAtom.store (mode == DetectionMode::Midi ? 0 : 1, std::memory_order_relaxed);
 }
 
+TheoryEngine::DetectionMode TheoryEngine::getDetectionMode() const noexcept
+{
+    return detectionModeAtom.load (std::memory_order_relaxed) != 0
+               ? DetectionMode::Audio
+               : DetectionMode::Midi;
+}
+
 // =============================================================================
 // Detection results
 // =============================================================================

@@ -2,6 +2,15 @@
 
 namespace wolfsden::ui
 {
+void WolfsDenLookAndFeel::configureRotarySlider(juce::Slider& s) noexcept
+{
+    using F = juce::MathConstants<float>;
+    // JUCE angles: clockwise from 12 o'clock. Min at bottom-left (~7:30) = 5π/4; 270° sweep; ~90° gap.
+    const float a0 = F::pi * 1.25f;             // 225° — SW (not 3π/4, which is SE in this convention)
+    const float a1 = a0 + F::pi * 1.5f;         // +270° as angle increases (clockwise along the dial)
+    s.setRotaryParameters({ a0, a1, true });
+}
+
 WolfsDenLookAndFeel::WolfsDenLookAndFeel()
 {
     if (auto tf = Theme::interTypeface())
@@ -38,29 +47,74 @@ void WolfsDenLookAndFeel::drawRotarySlider(juce::Graphics& g,
     const float cy = bounds.getCentreY();
     const float r = juce::jmin(bounds.getWidth(), bounds.getHeight()) * 0.5f;
 
-    g.setColour(Theme::backgroundDark());
-    g.fillEllipse(bounds);
+    const float aStart = rotaryStartAngle;
+    const float aEnd = rotaryEndAngle;
+    const float aCurr = aStart + sliderPosProportional * (aEnd - aStart);
+    const float sweep = aEnd - aStart;
 
-    const float a0 = rotaryStartAngle;
-    const float a1 = rotaryStartAngle + sliderPosProportional * (rotaryEndAngle - rotaryStartAngle);
-    juce::Path arc;
-    arc.addCentredArc(cx, cy, r - 3.f, r - 3.f, 0.f, a0, a1, true);
-    g.setColour(Theme::accentPrimary());
-    g.strokePath(arc, juce::PathStrokeType(3.f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    // True circle (inscribed) — avoids stretched ovals when the slider cell is rectangular
+    const float faceD = juce::jmax(4.f, juce::jmin(bounds.getWidth(), bounds.getHeight()) - 10.f);
+    const auto face = juce::Rectangle<float>(faceD, faceD).withCentre({ cx, cy });
 
-    g.setColour(Theme::textDisabled());
-    juce::Path ring;
-    ring.addCentredArc(cx, cy, r - 1.f, r - 1.f, 0.f, rotaryStartAngle, rotaryEndAngle, true);
-    g.strokePath(ring, juce::PathStrokeType(1.2f));
+    g.setColour(Theme::panelSurface().darker(0.03f));
+    g.fillEllipse(face);
+
+    g.setColour(Theme::textDisabled().withAlpha(0.45f));
+    g.drawEllipse(face, 1.f);
+
+    // JUCE rotary angles are clockwise from 12 o'clock (same as Path::addCentredArc / Point::getPointOnCircumference)
+    auto polar = [cx, cy](float rad, float angJuce) -> juce::Point<float>
+    {
+        return { cx + rad * std::sin(angJuce), cy - rad * std::cos(angJuce) };
+    };
+
+    const float tickOuter = r - 2.f;
+    const int numTicks = juce::jlimit(9, 17, (int)(r * 0.28f));
+    for (int i = 0; i <= numTicks; ++i)
+    {
+        const float t = (float)i / (float)numTicks;
+        const float ang = aStart + t * sweep;
+        const bool major = (i % 2 == 0);
+        const float len = major ? 4.5f : 2.5f;
+        const float inner = tickOuter - len;
+        const auto p0 = polar(inner, ang);
+        const auto p1 = polar(tickOuter, ang);
+        g.setColour(Theme::textDisabled().withAlpha(major ? 0.9f : 0.55f));
+        g.drawLine(p0.x, p0.y, p1.x, p1.y, major ? 1.35f : 1.f);
+    }
+
+    // Full-range track arc (subtle)
+    juce::Path trackArc;
+    trackArc.addCentredArc(cx, cy, r - 8.f, r - 8.f, 0.f, aStart, aEnd, true);
+    g.setColour(Theme::textDisabled().withAlpha(0.35f));
+    g.strokePath(trackArc, juce::PathStrokeType(1.f));
+
+    // Value arc — dotted cyan (like reference MASTER VOL arc)
+    if (sliderPosProportional > 0.001f)
+    {
+        juce::Path valArc;
+        valArc.addCentredArc(cx, cy, r - 8.f, r - 8.f, 0.f, aStart, aCurr, true);
+        const float dashLens[] = { 2.2f, 3.8f };
+        juce::Path dashed;
+        juce::PathStrokeType(1.6f).createDashedStroke(dashed, valArc, dashLens, 2, {});
+        g.setColour(Theme::accentHot());
+        g.strokePath(dashed, juce::PathStrokeType(1.6f));
+    }
+
+    // Rim pointer — scale down on small sliders so compact FX / Theory knobs stay readable
+    const float dotR = r - 9.f;
+    const auto thumb = polar(dotR, aCurr);
+    const float thumbSide = juce::jlimit(4.f, 6.f, faceD * 0.11f);
+    g.setColour(Theme::accentHot());
+    g.fillEllipse(juce::Rectangle<float>(thumbSide, thumbSide).withCentre(thumb));
+    g.setColour(Theme::accentPrimary().withAlpha(0.5f));
+    g.drawEllipse(juce::Rectangle<float>(thumbSide, thumbSide).withCentre(thumb), 1.f);
 
     if (slider.isMouseOverOrDragging())
     {
-        g.setColour(Theme::accentHot().withAlpha(0.25f));
-        g.fillEllipse(bounds.reduced(6.f));
+        g.setColour(Theme::accentHot().withAlpha(0.35f));
+        g.drawEllipse(face.expanded(1.f), 1.f);
     }
-
-    g.setColour(Theme::textPrimary());
-    g.fillEllipse(cx - 3.f, cy - 3.f, 6.f, 6.f);
 }
 
 void WolfsDenLookAndFeel::drawLinearSlider(juce::Graphics& g,

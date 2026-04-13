@@ -98,6 +98,8 @@ public:
     juce::File getFactoryContentDir() const noexcept { return factoryContentDir; }
 
     void setLastEditorBounds(int width, int height);
+    int getEditorWidth() const noexcept { return editorWidth.load(std::memory_order_relaxed); }
+    int getEditorHeight() const noexcept { return editorHeight.load(std::memory_order_relaxed); }
 
     wolfsden::TheoryEngine& getTheoryEngine() noexcept { return theoryEngine; }
     const wolfsden::TheoryEngine& getTheoryEngine() const noexcept { return theoryEngine; }
@@ -157,6 +159,7 @@ private:
 
     std::atomic<int> editorWidth { 480 };
     std::atomic<int> editorHeight { 320 };
+    juce::UndoManager undoManager;
 
     /** 8 ch: per-layer stereo before FxEngine (L0,R0,…,L3,R3). */
     juce::AudioBuffer<float> synthLayerBus;

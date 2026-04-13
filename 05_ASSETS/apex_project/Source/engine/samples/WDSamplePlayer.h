@@ -19,8 +19,8 @@ namespace wolfsden
  *    - loadNow() is called on a background thread (never from the audio thread).
  *
  *  Memory model:
- *    - Samples ≤ 2 MB are fully pre-loaded into a juce::AudioBuffer<float>.
- *    - Samples > 2 MB are streamed from an AudioFormatReader with a 1024-frame read-ahead.
+ *    - Samples ≤ kMaxPreloadMB are fully pre-loaded (keeps disk off the audio thread).
+ *    - Larger files stream via AudioFormatReader + read-ahead (may cost CPU / occasional glitches).
  *
  *  The caller (VoiceLayer) applies the amplitude ADSR on top of processBlock() output.
  */
@@ -79,7 +79,8 @@ public:
                   float startFrac, float endFrac);
 
     static constexpr int   kReadAheadFrames = 1024;
-    static constexpr float kMaxPreloadMB    = 2.0f;
+    /** Preload typical instrument WAVs; streaming uses sync disk reads on the audio thread (can crackle). */
+    static constexpr float kMaxPreloadMB    = 48.0f;
 
 private:
     double sr       = 44100.0;

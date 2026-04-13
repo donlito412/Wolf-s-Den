@@ -5,7 +5,10 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <array>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <vector>
 
 class WolfsDenAudioProcessor;
 
@@ -33,6 +36,9 @@ public:
     ~ColorsGrid() override;
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& e) override;
+
+    /** If set, invoked with (row 0–5, col 0–6) when a harmony cell is clicked. */
+    std::function<void(int, int)> onColorsCell;
 
 private:
     void timerCallback() override;
@@ -68,6 +74,33 @@ public:
 private:
     void timerCallback() override;
     void showSub(int i);
+    void chordPadClicked(int padIndex);
+    void degreePadClicked(int degreeIndex);
+    void progressionAddClicked();
+    void progressionClearClicked();
+    void progressionSlotClicked(int slotIndex);
+    void refreshProgressionSlotUi();
+    void colorsCellClicked(int row, int col);
+
+    /** Def index into TheoryEngine chord defs, or -1 for detector-driven pads 0–2. */
+    std::array<int, 8> chordPadLibraryDefId_ {};
+    struct ProgStep
+    {
+        int typeIdx = 0;
+        int rootPc = 0;
+    };
+    std::array<std::optional<ProgStep>, 8> progressionSteps_ {};
+
+    /** Short MIDI preview via shared keyboard state; released after a few timer ticks. */
+    std::array<int, 8> previewNotes_ {};
+    int previewCount_ = 0;
+    int previewTicksLeft_ = 0;
+
+    void stopChordPreview();
+    void startChordPreview(int rootMidi, const int* iv, int nIv);
+    void startChordPreviewFromIntervals(int rootPc012, const std::vector<int>& intervalsFromRoot);
+    void applyChordTypeRootPreview(int chordTypeApvtsIdx, int rootPc012);
+    void applyChordFromLibraryDefIndex(int defIndex, int rootPc012);
 
     WolfsDenAudioProcessor& processor;
     juce::AudioProcessorValueTreeState& apvts;
@@ -75,7 +108,7 @@ private:
     // Sub-tab buttons
     juce::TextButton tabBrowse { "Browse chords" };
     juce::TextButton tabCof { "Circle of fifths" };
-    juce::TextButton tabExplore { "Explore" };
+    juce::TextButton tabExplore { "Scales" };
     juce::TextButton tabColors { "Colors" };
 
     // Top bar controls
@@ -88,14 +121,25 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attRoot;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attScale;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attVL;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> attChordRoot;
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attInv;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attDensity;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> attOct;
 
     // --- Browse Chords sub-tab ---
     juce::Component panelBrowse;
+    juce::Label lblChordRoot;
+    juce::ComboBox chordRootAnchor;
     std::array<juce::Label, 3> matchLabs {};       // top chord detection results
     std::array<juce::TextButton, 8> chordPads {};  // Section A: 8 chord pads
     std::array<juce::TextButton, 7> degreePads {}; // Section B: diatonic degrees
-    juce::Label progressionLabel;                   // Section C placeholder
+    juce::Label progressionHeader;
+    juce::TextButton progressionAdd { "Add" };
+    juce::TextButton progressionClear { "Clear" };
+    std::array<juce::TextButton, 8> progressionSlots {};
     // Modifier sidebar
+    juce::Label lblInv, lblDens, lblOct;
     juce::Slider inversionSlider;
     juce::Slider densitySlider;
     juce::Slider octaveSlider;

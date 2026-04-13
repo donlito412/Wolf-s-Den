@@ -3,6 +3,9 @@
 
 namespace
 {
+// Verify loaded binary: `strings "…/Wolf's Den.vst3/…/Wolf's Den" | grep wd_apvts`
+[[maybe_unused]] constexpr char kWolfsDenBuildVerify[] = "wd_apvts_raw_denorm_20260410";
+
 static constexpr std::array<const char*, 5> kAutomationTestParamIds {
     "master_volume",
     "master_pan",
@@ -32,8 +35,9 @@ WolfsDenAudioProcessor::WolfsDenAudioProcessor()
 #endif
       ),
 #endif
-      apvts(*this, nullptr, "Parameters", wolfsden::makeParameterLayout())
+      apvts(*this, &undoManager, "Parameters", wolfsden::makeParameterLayout())
 {
+    juce::ignoreUnused(kWolfsDenBuildVerify);
     registerApvtsListeners();
 
     const auto dbDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
@@ -166,7 +170,7 @@ void WolfsDenAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBloc
     syncTheoryParamsFromApvts();
     midiPipeline.prepare(sampleRate, samplesPerBlock, apvts);
     synthEngine.prepare(sampleRate, samplesPerBlock, apvts);
-    synthLayerBus.setSize(8, samplesPerBlock);
+    synthLayerBus.setSize(8, juce::jmax(1, samplesPerBlock), false, false, true);
     fxEngine.prepare(sampleRate, samplesPerBlock, apvts);
 }
 
@@ -227,10 +231,13 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         buffer.clear(i, 0, buffer.getNumSamples());
 
     theoryEngine.processMidi(midi);
-    midiPipeline.process(midi, n, getSampleRate(), getPlayHead(), theoryEngine);
+    midiPipeline.process(midi, n, getSampleRate(), getPlayHead(), theoryEngine, apvts);
 
-    if (synthLayerBus.getNumChannels() < 8 || synthLayerBus.getNumSamples() < n)
-        synthLayerBus.setSize(8, n);
+    // Grow-only: variable host block sizes would otherwise realloc every block → clicks.
+    if (synthLayerBus.getNumChannels() < 8)
+        synthLayerBus.setSize(8, juce::jmax(1, n), false, false, true);
+    else if (synthLayerBus.getNumSamples() < n)
+        synthLayerBus.setSize(8, n, false, false, true);
 
     synthEngine.process(synthLayerBus, n, midi, apvts);
     fxEngine.processBlock(synthLayerBus,

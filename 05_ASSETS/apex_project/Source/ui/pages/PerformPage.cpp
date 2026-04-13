@@ -2,6 +2,7 @@
 
 #include "../../PluginProcessor.h"
 #include "../../engine/TheoryEngine.h"
+#include "../theme/WolfsDenLookAndFeel.h"
 
 namespace wolfsden::ui
 {
@@ -12,8 +13,9 @@ static const char* kRootNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "
 void styleKnob(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+    WolfsDenLookAndFeel::configureRotarySlider(s);
     s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 16);
-    s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentPrimary());
+    s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentAlt());
     s.setColour(juce::Slider::thumbColourId, Theme::accentHot());
 }
 
@@ -29,6 +31,33 @@ void sectionTitle(juce::Label& L, const juce::String& t)
     L.setFont(Theme::fontPanelHeader());
     L.setColour(juce::Label::textColourId, Theme::textPrimary());
     L.setJustificationType(juce::Justification::centred);
+}
+
+/** Match resized() so divider lines align with panels. */
+void performThreeColWidths(int totalW, int& s0, int& s1, int& s2)
+{
+    s0 = juce::jmax(208, (int)((float)totalW * 0.29f));
+    s1 = juce::jmax(188, (int)((float)totalW * 0.24f));
+    if (s0 + s1 > totalW - 248)
+    {
+        const int slack = juce::jmax(0, totalW - 248);
+        s0 = juce::jmax(180, slack * 54 / 100);
+        s1 = juce::jmax(165, slack - s0);
+    }
+    s2 = totalW - s0 - s1;
+    if (s2 < 248)
+    {
+        const int d = 248 - s2;
+        s0 = juce::jmax(175, s0 - d / 2);
+        s1 = juce::jmax(160, s1 - d / 2);
+        s2 = totalW - s0 - s1;
+    }
+    if (s2 < 120)
+    {
+        s0 = totalW * 30 / 100;
+        s1 = totalW * 26 / 100;
+        s2 = totalW - s0 - s1;
+    }
 }
 
 } // namespace
@@ -325,6 +354,11 @@ PerformPage::PerformPage(WolfsDenAudioProcessor& proc)
     // --- Chord Mode ---
     addAndMakeVisible(chordMode);
     addAndMakeVisible(chordType);
+    lblChordInv.setText("Inversion", juce::dontSendNotification);
+    lblChordInv.setFont(Theme::fontLabel());
+    lblChordInv.setColour(juce::Label::textColourId, Theme::textSecondary());
+    lblChordInv.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(lblChordInv);
     styleH(chordInv);
     chordInv.setRange(0, 3, 1);
     addAndMakeVisible(chordInv);
@@ -332,6 +366,17 @@ PerformPage::PerformPage(WolfsDenAudioProcessor& proc)
 
     // --- Arpeggiator ---
     addAndMakeVisible(arpOn);
+    auto prepArpCap = [](juce::Label& L, const juce::String& t) {
+        L.setText(t, juce::dontSendNotification);
+        L.setFont(Theme::fontLabel());
+        L.setColour(juce::Label::textColourId, Theme::textSecondary());
+        L.setJustificationType(juce::Justification::centred);
+    };
+    prepArpCap(lblArpRate, "Rate");
+    prepArpCap(lblArpPat, "Pattern");
+    prepArpCap(lblArpOct, "Octaves");
+    for (auto* L : { &lblArpRate, &lblArpPat, &lblArpOct })
+        addAndMakeVisible(*L);
     styleKnob(arpRate);
     addAndMakeVisible(arpRate);
     addAndMakeVisible(arpPattern);
@@ -362,6 +407,19 @@ PerformPage::PerformPage(WolfsDenAudioProcessor& proc)
         styleH(*s);
         addAndMakeVisible(*s);
     }
+    auto prepStepLab = [](juce::Label& L, const juce::String& t, juce::Slider& s) {
+        L.setText(t, juce::dontSendNotification);
+        L.setFont(Theme::fontLabel());
+        L.setColour(juce::Label::textColourId, Theme::textSecondary());
+        L.setJustificationType(juce::Justification::centredRight);
+        L.attachToComponent(&s, true);
+    };
+    prepStepLab(lblStepVel, "Vel", stepVel);
+    prepStepLab(lblStepDur, "Dur", stepDur);
+    prepStepLab(lblStepTrn, "Transp", stepTrn);
+    prepStepLab(lblStepRkt, "Retrig", stepRkt);
+    for (auto* L : { &lblStepVel, &lblStepDur, &lblStepTrn, &lblStepRkt })
+        addAndMakeVisible(*L);
 
     // Scale picker populated from Theory engine
     auto& th = proc.getTheoryEngine();
@@ -459,8 +517,8 @@ void PerformPage::paint(juce::Graphics& g)
     auto r = getLocalBounds().reduced(12);
     r.removeFromTop(28);
     const int totalW = r.getWidth();
-    const int secW0 = (int)((float)totalW * 0.30f);
-    const int secW1 = (int)((float)totalW * 0.25f);
+    int secW0 = 0, secW1 = 0, secW2 = 0;
+    performThreeColWidths(totalW, secW0, secW1, secW2);
 
     // Vertical lines between sections
     g.setColour(Theme::textDisabled().withAlpha(0.3f));
@@ -476,7 +534,7 @@ void PerformPage::paint(juce::Graphics& g)
 
     auto keysR = juce::Rectangle<int>(r.getX(), r.getY(), secW0, r.getHeight());
     auto chordR = juce::Rectangle<int>(r.getX() + secW0, r.getY(), secW1, r.getHeight());
-    auto arpR = juce::Rectangle<int>(r.getX() + secW0 + secW1, r.getY(), totalW - secW0 - secW1, r.getHeight());
+    auto arpR = juce::Rectangle<int>(r.getX() + secW0 + secW1, r.getY(), secW2, r.getHeight());
     renderPanel(keysR);
     renderPanel(chordR);
     renderPanel(arpR);
@@ -497,12 +555,13 @@ void PerformPage::resized()
     r.removeFromTop(kPageTitle);
 
     const int totalW = r.getWidth();
-    const int secW0 = (int)((float)totalW * 0.30f); // Keys Lock
-    const int secW1 = (int)((float)totalW * 0.25f); // Chord Mode
+    int secW0 = 0, secW1 = 0, secW2 = 0;
+    performThreeColWidths(totalW, secW0, secW1, secW2);
 
     auto keysArea = r.removeFromLeft(secW0).reduced(8, 4);
     auto chordArea = r.removeFromLeft(secW1).reduced(8, 4);
     auto arpArea = r.reduced(8, 4);
+    juce::ignoreUnused(secW2);
 
     // ---- KEYS LOCK ----
     keysLockTitle.setBounds(keysArea.removeFromTop(kSectionTitle));
@@ -528,7 +587,8 @@ void PerformPage::resized()
     chordArea.removeFromTop(kVGap);
     chordType.setBounds(chordArea.removeFromTop(26));
     chordArea.removeFromTop(kVGap);
-    chordInv.setBounds(chordArea.removeFromTop(26));
+    lblChordInv.setBounds(chordArea.removeFromTop(12));
+    chordInv.setBounds(chordArea.removeFromTop(24).reduced(0, 2));
     chordArea.removeFromTop(kVGap);
     scaleConstraint.setBounds(chordArea.removeFromTop(24));
 
@@ -542,10 +602,17 @@ void PerformPage::resized()
     arpSync.setBounds(arpTopRow.removeFromLeft(100));
     arpArea.removeFromTop(kVGap);
 
-    auto arpKnobRow = arpArea.removeFromTop(68);
-    const int knobW = juce::jmin(80, arpKnobRow.getWidth() / 3);
+    constexpr int kArpCap = 12;
+    auto arpKnobBlock = arpArea.removeFromTop(80);
+    auto arpCapRow = arpKnobBlock.removeFromTop(kArpCap);
+    auto arpKnobRow = arpKnobBlock;
+    const int knobW = juce::jmin(84, arpKnobRow.getWidth() / 3);
+    const int patW = juce::jmin(128, juce::jmax(90, arpKnobRow.getWidth() / 2));
+    lblArpRate.setBounds(arpCapRow.removeFromLeft(knobW));
+    lblArpPat.setBounds(arpCapRow.removeFromLeft(patW));
+    lblArpOct.setBounds(arpCapRow);
     arpRate.setBounds(arpKnobRow.removeFromLeft(knobW).reduced(2, 0));
-    arpPattern.setBounds(arpKnobRow.removeFromLeft(juce::jmin(120, arpKnobRow.getWidth() / 2)).reduced(2, 8));
+    arpPattern.setBounds(arpKnobRow.removeFromLeft(patW).reduced(2, 8));
     arpOct.setBounds(arpKnobRow.reduced(2, 8));
     arpArea.removeFromTop(kVGap);
 

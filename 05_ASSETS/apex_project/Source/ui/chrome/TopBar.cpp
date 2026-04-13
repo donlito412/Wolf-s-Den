@@ -8,7 +8,7 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
     : processor(proc)
 {
     startTimerHz(8);
-    logoLabel.setText("Wolf's Den", juce::dontSendNotification);
+    logoLabel.setText("Howling Wolves", juce::dontSendNotification);
     logoLabel.setFont(Theme::fontPanelHeader());
     logoLabel.setColour(juce::Label::textColourId, Theme::accentHot());
     addAndMakeVisible(logoLabel);
@@ -50,7 +50,7 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(settingsBtn);
     settingsBtn.onClick = [] {
         juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                "Wolf's Den",
+                                                "Howling Wolves",
                                                 "Settings — audio/MIDI from your DAW host.",
                                                 "OK");
     };

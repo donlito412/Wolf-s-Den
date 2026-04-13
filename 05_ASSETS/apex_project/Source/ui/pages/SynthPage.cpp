@@ -1,6 +1,7 @@
 #include "SynthPage.h"
 
 #include "../../PluginProcessor.h"
+#include "../theme/WolfsDenLookAndFeel.h"
 
 namespace wolfsden::ui
 {
@@ -24,6 +25,14 @@ void addC(juce::AudioProcessorValueTreeState& apvts,
 {
     if (apvts.getParameter(id) != nullptr)
         v.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, id, cb));
+}
+
+void prepCap(juce::Label& L, const juce::String& t, juce::Justification j = juce::Justification::centred)
+{
+    L.setText(t, juce::dontSendNotification);
+    L.setFont(Theme::fontLabel());
+    L.setColour(juce::Label::textColourId, Theme::textSecondary());
+    L.setJustificationType(j);
 }
 } // namespace
 
@@ -88,8 +97,9 @@ void WaveformPreview::paint(juce::Graphics& g)
 void SynthPage::styleKnob(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+    WolfsDenLookAndFeel::configureRotarySlider(s);
     s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 64, 22);
-    s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentPrimary());
+    s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentAlt());
     s.setColour(juce::Slider::thumbColourId, Theme::accentHot());
 }
 
@@ -167,6 +177,39 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     prep(lblLfoPlanGap,   "", Theme::textDisabled());
     lblFilter2.setVisible(false);
     for (auto* L : { &lblFilter1, &lblFilter2Header, &lblFilterTopology, &lblDrivePlanGap, &lblLfoPlanGap })
+        addAndMakeVisible(*L);
+
+    prepCap(lblOct, "Octave");
+    prepCap(lblSemi, "Semitone");
+    prepCap(lblFine, "Fine");
+    prepCap(lblCut1, "Cutoff");
+    prepCap(lblRes1, "Res");
+    prepCap(lblDrv1, "Drive");
+    prepCap(lblCut2, "Cutoff");
+    prepCap(lblRes2, "Res");
+    prepCap(lblDrv2, "Drive");
+    prepCap(lblFilAtk, "Attack", juce::Justification::centredRight);
+    prepCap(lblFilDec, "Decay", juce::Justification::centredRight);
+    prepCap(lblFilSus, "Sustain", juce::Justification::centredRight);
+    prepCap(lblFilRel, "Release", juce::Justification::centredRight);
+    prepCap(lblAmpAtk, "Attack", juce::Justification::centredRight);
+    prepCap(lblAmpDec, "Decay", juce::Justification::centredRight);
+    prepCap(lblAmpSus, "Sustain", juce::Justification::centredRight);
+    prepCap(lblAmpRel, "Release", juce::Justification::centredRight);
+    prepCap(lblUniV, "Voices");
+    prepCap(lblUniDet, "Detune");
+    prepCap(lblUniSpr, "Spread");
+    prepCap(lblLevel, "Level");
+    prepCap(lblPan, "Pan");
+    prepCap(lblL1R, "Rate");
+    prepCap(lblL1D, "Depth");
+    prepCap(lblL1Sh, "Shape");
+    prepCap(lblL2R, "Rate");
+    prepCap(lblL2D, "Depth");
+    prepCap(lblL2Sh, "Shape");
+    for (auto* L : { &lblOct, &lblSemi, &lblFine, &lblCut1, &lblRes1, &lblDrv1, &lblCut2, &lblRes2, &lblDrv2,
+                    &lblFilAtk, &lblFilDec, &lblFilSus, &lblFilRel, &lblAmpAtk, &lblAmpDec, &lblAmpSus, &lblAmpRel,
+                    &lblUniV, &lblUniDet, &lblUniSpr, &lblLevel, &lblPan, &lblL1R, &lblL1D, &lblL1Sh, &lblL2R, &lblL2D, &lblL2Sh })
         addAndMakeVisible(*L);
 
     // OSC tune knobs — Octave / Semitone / Fine
@@ -289,7 +332,7 @@ SynthPage::~SynthPage() = default;
 
 juce::String SynthPage::layerKey(const juce::String& tail) const
 {
-    return "layer_" + juce::String(activeLayer) + "_" + tail;
+    return "layer" + juce::String(activeLayer) + "_" + tail;
 }
 
 void SynthPage::clearLayerBindings()
@@ -423,19 +466,6 @@ void SynthPage::paint(juce::Graphics& g)
         g.fillRoundedRectangle(zoneGranular.toFloat().reduced(2.f), 4.f);
     }
 
-    // Knob labels for tune row
-    if (!zoneOsc.isEmpty())
-    {
-        const auto kbRow = oscOctave.getBounds().withTop(oscOctave.getBottom() - 15);
-        const auto tuneArea = juce::Rectangle<int>(zoneOsc.getX(), kbRow.getY(), zoneOsc.getWidth(), 15);
-        const int kw3 = (tuneArea.getWidth() - 4) / 3;
-        g.setColour(Theme::textDisabled());
-        g.setFont(Theme::fontLabel());
-        g.drawText("Oct",  tuneArea.withWidth(kw3), juce::Justification::centred);
-        g.drawText("Semi", tuneArea.withWidth(kw3).withX(tuneArea.getX() + kw3 + 2), juce::Justification::centred);
-        g.drawText("Fine", tuneArea.withWidth(kw3).withX(tuneArea.getX() + 2 * kw3 + 4), juce::Justification::centred);
-    }
-
     for (int i = 0; i < 4; ++i)
     {
         const auto b = layerTab[(size_t)i].getBounds();
@@ -473,9 +503,10 @@ void SynthPage::resized()
     constexpr int kTitleH = 26;
     constexpr int kTabH = 36;
     constexpr int kSecTitle = 18;
-    constexpr int kLfoControlsH = 56;
+    constexpr int kLfoControlsH = 72;
     constexpr int kLfoNoteH = 18;
     constexpr int kFootH = 18;
+    constexpr int kCap = 12;
 
     auto bounds = getLocalBounds().reduced(kMargin);
     bounds.removeFromTop(kTitleH);
@@ -496,20 +527,44 @@ void SynthPage::resized()
     lfo2Area.removeFromTop(18);
     {
         const int t = lfo1Area.getWidth() / 3;
-        lfo1Rate.setBounds(lfo1Area.removeFromLeft(t).reduced(2, 0));
-        lfo1Depth.setBounds(lfo1Area.removeFromLeft(t).reduced(2, 0));
-        lfo1Shape.setBounds(lfo1Area.reduced(2, 0));
+        auto a0 = lfo1Area.removeFromLeft(t).reduced(2, 0);
+        lblL1R.setBounds(a0.removeFromTop(kCap));
+        lfo1Rate.setBounds(a0);
+        auto a1 = lfo1Area.removeFromLeft(t).reduced(2, 0);
+        lblL1D.setBounds(a1.removeFromTop(kCap));
+        lfo1Depth.setBounds(a1);
+        auto a2 = lfo1Area.reduced(2, 0);
+        lblL1Sh.setBounds(a2.removeFromTop(kCap));
+        lfo1Shape.setBounds(a2);
     }
     {
         const int t = lfo2Area.getWidth() / 3;
-        lfo2Rate.setBounds(lfo2Area.removeFromLeft(t).reduced(2, 0));
-        lfo2Depth.setBounds(lfo2Area.removeFromLeft(t).reduced(2, 0));
-        lfo2Shape.setBounds(lfo2Area.reduced(2, 0));
+        auto b0 = lfo2Area.removeFromLeft(t).reduced(2, 0);
+        lblL2R.setBounds(b0.removeFromTop(kCap));
+        lfo2Rate.setBounds(b0);
+        auto b1 = lfo2Area.removeFromLeft(t).reduced(2, 0);
+        lblL2D.setBounds(b1.removeFromTop(kCap));
+        lfo2Depth.setBounds(b1);
+        auto b2 = lfo2Area.reduced(2, 0);
+        lblL2Sh.setBounds(b2.removeFromTop(kCap));
+        lfo2Shape.setBounds(b2);
     }
 
     const int totalW = bounds.getWidth();
-    const int wOsc = juce::roundToInt((float)totalW * 0.28f);
-    const int wFilt = juce::roundToInt((float)totalW * 0.38f);
+    int wOsc = juce::roundToInt((float)totalW * 0.28f);
+    int wFilt = juce::roundToInt((float)totalW * 0.38f);
+    int wAmp = totalW - wOsc - wFilt;
+    wOsc = juce::jmax(140, wOsc);
+    wFilt = juce::jmax(208, wFilt);
+    wAmp = juce::jmax(158, wAmp);
+    if (wOsc + wFilt + wAmp > totalW)
+    {
+        const float s = (float)totalW / (float)(wOsc + wFilt + wAmp);
+        wOsc = juce::jmax(120, (int)((float)wOsc * s));
+        wFilt = juce::jmax(180, (int)((float)wFilt * s));
+        wAmp = juce::jmax(120, totalW - wOsc - wFilt);
+        wFilt = totalW - wOsc - wAmp;
+    }
     auto colOsc = bounds.removeFromLeft(wOsc);
     auto colFilt = bounds.removeFromLeft(wFilt);
     auto colAmp = bounds;
@@ -524,18 +579,19 @@ void SynthPage::resized()
     const int x0 = o.getX();
     const int cw = o.getWidth();
     const int btnH = 26;
-    const int btnW = cw / 4;
+    const int btnW = juce::jmax(1, cw / 4);
     for (int row = 0; row < 2; ++row)
         for (int c = 0; c < 4; ++c)
             oscModeBtn[(size_t)(row * 4 + c)]
                 .setBounds(x0 + c * btnW + 1, y + row * btnH, btnW - 2, btnH - 2);
     y += btnH * 2 + 8;
 
-    // Waveform preview
+    // Waveform preview (leave room below for granular block, optional sample row, and tune knobs + captions)
     const bool isGranular = granPos.isVisible();
     const int granControlsH = isGranular ? (4 * (15 + 20 + 3) + 4) : 0; // label + slider + gap per row
-    const int tuneKnobH = 70;
-    const int waveH = juce::jlimit(40, 80, juce::jmax(40, o.getBottom() - y - granControlsH - tuneKnobH - 8));
+    const int sampleH = loadSampleBtn.isVisible() ? 34 : 0;
+    const int tuneBlock = granControlsH + sampleH + kCap + 58 + 8;
+    const int waveH = juce::jlimit(40, 80, juce::jmax(40, o.getBottom() - y - tuneBlock));
     wavePreview.setBounds(x0, y, cw, waveH);
     y += wavePreview.getHeight() + 6;
 
@@ -565,12 +621,15 @@ void SynthPage::resized()
         y += 34;
     }
 
-    // Tune: Octave / Semitone / Fine — three equal knobs
-    const int kw3 = (cw - 4) / 3;
-    const int knobH = juce::jmax(tuneKnobH, o.getBottom() - y);
-    oscOctave.setBounds(x0,           y, kw3, knobH);
-    oscCoarse.setBounds(x0 + kw3 + 2, y, kw3, knobH);
-    oscFine.setBounds  (x0 + 2 * kw3 + 4, y, kw3, knobH);
+    // Tune: Octave / Semitone / Fine — captions + knobs
+    const int kw3 = juce::jmax(40, (cw - 4) / 3);
+    const int tuneBodyH = juce::jmax(52, o.getBottom() - y - kCap);
+    lblOct.setBounds(x0, y, kw3, kCap);
+    oscOctave.setBounds(x0, y + kCap, kw3, tuneBodyH);
+    lblSemi.setBounds(x0 + kw3 + 2, y, kw3, kCap);
+    oscCoarse.setBounds(x0 + kw3 + 2, y + kCap, kw3, tuneBodyH);
+    lblFine.setBounds(x0 + 2 * kw3 + 4, y, kw3, kCap);
+    oscFine.setBounds(x0 + 2 * kw3 + 4, y + kCap, kw3, tuneBodyH);
 
     auto f = colFilt.reduced(4, 0);
     f.removeFromTop(kSecTitle);
@@ -585,12 +644,16 @@ void SynthPage::resized()
     y += 28;
     // Filter 1: Cutoff / Resonance / Drive knobs
     {
-        const int fk = (fcw - 4) / 3;
-        fCut.setBounds(fx0,          y, fk, 64);
-        fRes.setBounds(fx0 + fk + 2, y, fk, 64);
-        fDrive.setBounds(fx0 + 2 * fk + 4, y, fk, 64);
+        const int fk = juce::jmax(44, (fcw - 4) / 3);
+        const int fh = juce::jlimit(54, 76, juce::jmax(54, (f.getBottom() - y - 130) / 4));
+        lblCut1.setBounds(fx0, y, fk, kCap);
+        fCut.setBounds(fx0, y + kCap, fk, fh);
+        lblRes1.setBounds(fx0 + fk + 2, y, fk, kCap);
+        fRes.setBounds(fx0 + fk + 2, y + kCap, fk, fh);
+        lblDrv1.setBounds(fx0 + 2 * fk + 4, y, fk, kCap);
+        fDrive.setBounds(fx0 + 2 * fk + 4, y + kCap, fk, fh);
+        y += kCap + fh + 6;
     }
-    y += 68;
 
     // Filter 2 header
     lblFilter2Header.setBounds(fx0, y, fcw, 18);
@@ -599,12 +662,16 @@ void SynthPage::resized()
     y += 28;
     // Filter 2: Cutoff / Resonance / Drive knobs
     {
-        const int fk = (fcw - 4) / 3;
-        fCut2.setBounds(fx0,          y, fk, 64);
-        fRes2.setBounds(fx0 + fk + 2, y, fk, 64);
-        fDrive2.setBounds(fx0 + 2 * fk + 4, y, fk, 64);
+        const int fk = juce::jmax(44, (fcw - 4) / 3);
+        const int fh = juce::jlimit(54, 76, juce::jmax(54, (f.getBottom() - y - 96) / 3));
+        lblCut2.setBounds(fx0, y, fk, kCap);
+        fCut2.setBounds(fx0, y + kCap, fk, fh);
+        lblRes2.setBounds(fx0 + fk + 2, y, fk, kCap);
+        fRes2.setBounds(fx0 + fk + 2, y + kCap, fk, fh);
+        lblDrv2.setBounds(fx0 + 2 * fk + 4, y, fk, kCap);
+        fDrive2.setBounds(fx0 + 2 * fk + 4, y + kCap, fk, fh);
+        y += kCap + fh + 6;
     }
-    y += 68;
 
     // Routing
     lblFilterTopology.setBounds(fx0, y, fcw, 16);
@@ -612,17 +679,22 @@ void SynthPage::resized()
     filterRoute.setBounds(fx0, y, fcw, 24);
     y += 28;
 
-    // Filter envelope
+    // Filter envelope (caption + slider per row)
     const int feH = 22;
-    filEnvA.setBounds(fx0, y, fcw, feH);
+    const int feLab = juce::jmin(52, juce::jmax(40, fcw / 5));
+    filEnvA.setBounds(fx0 + feLab, y, fcw - feLab, feH);
+    lblFilAtk.setBounds(fx0, y, feLab, feH);
     y += feH + 2;
-    filEnvD.setBounds(fx0, y, fcw, feH);
+    filEnvD.setBounds(fx0 + feLab, y, fcw - feLab, feH);
+    lblFilDec.setBounds(fx0, y, feLab, feH);
     y += feH + 2;
-    filEnvS.setBounds(fx0, y, fcw, feH);
+    filEnvS.setBounds(fx0 + feLab, y, fcw - feLab, feH);
+    lblFilSus.setBounds(fx0, y, feLab, feH);
     y += feH + 2;
-    filEnvR.setBounds(fx0, y, fcw, feH);
+    filEnvR.setBounds(fx0 + feLab, y, fcw - feLab, feH);
+    lblFilRel.setBounds(fx0, y, feLab, feH);
     y += feH + 4;
-    filEnvShape.setBounds(fx0, y, fcw, juce::jmin(52, f.getBottom() - y - 4));
+    filEnvShape.setBounds(fx0, y, fcw, juce::jmax(40, juce::jmin(52, f.getBottom() - y - 4)));
     lblDrivePlanGap.setBounds(fx0, y, 0, 0); // hidden, kept to avoid null ref
 
     auto a = colAmp.reduced(4, 0);
@@ -631,27 +703,46 @@ void SynthPage::resized()
     const int ax0 = a.getX();
     const int acw = a.getWidth();
     const int ah = 22;
-    ampA.setBounds(ax0, y, acw, ah);
+    const int aeLab = juce::jmin(52, juce::jmax(38, acw / 5));
+    ampA.setBounds(ax0 + aeLab, y, acw - aeLab, ah);
+    lblAmpAtk.setBounds(ax0, y, aeLab, ah);
     y += ah + 2;
-    ampD.setBounds(ax0, y, acw, ah);
+    ampD.setBounds(ax0 + aeLab, y, acw - aeLab, ah);
+    lblAmpDec.setBounds(ax0, y, aeLab, ah);
     y += ah + 2;
-    ampS.setBounds(ax0, y, acw, ah);
+    ampS.setBounds(ax0 + aeLab, y, acw - aeLab, ah);
+    lblAmpSus.setBounds(ax0, y, aeLab, ah);
     y += ah + 2;
-    ampR.setBounds(ax0, y, acw, ah);
+    ampR.setBounds(ax0 + aeLab, y, acw - aeLab, ah);
+    lblAmpRel.setBounds(ax0, y, aeLab, ah);
     y += ah + 6;
-    ampShape.setBounds(ax0, y, acw, 52);
-    y += 58;
-    auto uniR = juce::Rectangle<int>(ax0, y, acw, 66);
-    const int uw = uniR.getWidth() / 3;
-    uniVoices.setBounds(uniR.removeFromLeft(uw).reduced(2, 0));
-    uniDetune.setBounds(uniR.removeFromLeft(uw).reduced(2, 0));
-    uniSpread.setBounds(uniR.reduced(2, 0));
-    y += 72;
+    ampShape.setBounds(ax0, y, acw, juce::jmax(40, juce::jmin(52, a.getBottom() - y - 88)));
+    y += ampShape.getHeight() + 6;
+    const int uniRowH = kCap + 56;
+    const int uniH = juce::jmin(uniRowH, juce::jmax(kCap + 48, a.getBottom() - y - 4));
+    auto uniR = juce::Rectangle<int>(ax0, y, acw, uniH);
+    const int uw = juce::jmax(44, uniR.getWidth() / 3);
+    {
+        auto u0 = uniR.removeFromLeft(uw).reduced(2, 0);
+        lblUniV.setBounds(u0.removeFromTop(kCap));
+        uniVoices.setBounds(u0);
+        auto u1 = uniR.removeFromLeft(uw).reduced(2, 0);
+        lblUniDet.setBounds(u1.removeFromTop(kCap));
+        uniDetune.setBounds(u1);
+        auto u2 = uniR.reduced(2, 0);
+        lblUniSpr.setBounds(u2.removeFromTop(kCap));
+        uniSpread.setBounds(u2);
+    }
+    y += uniH + 8;
     auto tail = juce::Rectangle<int>(ax0, y, acw, a.getBottom() - y);
-    auto faderR = tail.removeFromRight(56);
-    ampVol.setBounds(faderR.reduced(4, 8));
-    const int panSz = juce::jmin(88, tail.getWidth());
-    ampPan.setBounds(tail.withSizeKeepingCentre(panSz, juce::jmin(76, tail.getHeight())).withY(tail.getY()));
+    auto faderR = tail.removeFromRight(58);
+    lblLevel.setBounds(faderR.removeFromTop(kCap).reduced(2, 0));
+    ampVol.setBounds(faderR.reduced(4, 4));
+    const int panSz = juce::jmax(64, juce::jmin(92, tail.getWidth()));
+    const int panH = juce::jmax(58, juce::jmin(80, tail.getHeight()));
+    auto panR = tail.withSizeKeepingCentre(panSz, panH).withY(tail.getY());
+    lblPan.setBounds(panR.removeFromTop(kCap));
+    ampPan.setBounds(panR.reduced(0, 2));
 }
 
 } // namespace wolfsden::ui

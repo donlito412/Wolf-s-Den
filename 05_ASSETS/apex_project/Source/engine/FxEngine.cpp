@@ -8,9 +8,17 @@ namespace wolfsden
 {
 namespace
 {
-inline float readAP(std::atomic<float>* p, float defV = 0.f) noexcept
+inline float readFloatAP(std::atomic<float>* ap, juce::AudioParameterFloat* pf, float defV) noexcept
 {
-    return p ? p->load(std::memory_order_relaxed) : defV;
+    if (!ap)
+        return defV;
+    const float v = ap->load(std::memory_order_relaxed);
+    if (pf != nullptr)
+    {
+        const auto r = pf->getNormalisableRange();
+        return juce::jlimit(r.start, r.end, v);
+    }
+    return v;
 }
 
 inline void wetMix(float dryL, float dryR, float wetL, float wetR, float m, float& outL, float& outR) noexcept
@@ -47,6 +55,8 @@ struct FxEngine::SlotDSP
     float monoLpL = 0.f, monoLpR = 0.f;
     float lastEqDb[4] { -1000.f, -1000.f, -1000.f, -1000.f };
     bool prepared = false;
+    /** 0 hall, 1 plate, 2 spring — skip setParameters unless changed (less work / fewer internal updates). */
+    int revPresetKey = -1;
 
     void updateEqIfNeeded(double sr, float g0dB, float g1dB, float g2dB, float g3dB) noexcept
     {
@@ -147,6 +157,7 @@ struct FxEngine::SlotDSP
             z = 0.f;
         decimPhase = holdL = holdR = 0.f;
         monoLpL = monoLpR = 0.f;
+        revPresetKey = -1;
         lastEqDb[0] = lastEqDb[1] = lastEqDb[2] = lastEqDb[3] = -1000.f;
         for (int i = 0; i < 4; ++i)
         {
@@ -172,23 +183,51 @@ void FxEngine::bindPointers(juce::AudioProcessorValueTreeState& state)
         for (int s = 0; s < 4; ++s)
         {
             const juce::String id = "fx_l" + juce::String(L) + "_s" + juce::String(s) + "_mix";
-            layerMixPtrs[(size_t)(L * 4 + s)] = state.getRawParameterValue(id);
+            const size_t ix = (size_t)(L * 4 + s);
+            layerMixPtrs[ix] = state.getRawParameterValue(id);
+            layerMixParamF[ix] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter(id));
         }
 
     commonMixPtrs[0] = state.getRawParameterValue("fx_reverb_mix");
     commonMixPtrs[1] = state.getRawParameterValue("fx_delay_mix");
     commonMixPtrs[2] = state.getRawParameterValue("fx_chorus_mix");
     commonMixPtrs[3] = state.getRawParameterValue("fx_compressor");
+    commonMixParamF[0] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter("fx_reverb_mix"));
+    commonMixParamF[1] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter("fx_delay_mix"));
+    commonMixParamF[2] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter("fx_chorus_mix"));
+    commonMixParamF[3] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter("fx_compressor"));
 
     for (int m = 0; m < 4; ++m)
-        masterMixPtrs[(size_t)m] = state.getRawParameterValue("fx_m" + juce::String(m) + "_mix");
+    {
+        const juce::String mid = "fx_m" + juce::String(m) + "_mix";
+        masterMixPtrs[(size_t)m] = state.getRawParameterValue(mid);
+        masterMixParamF[(size_t)m] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter(mid));
+    }
 
     for (int si = 0; si < 24; ++si)
     {
         const juce::String pfx = "fx_s" + juce::String(si).paddedLeft('0', 2) + "_eq";
         for (int b = 0; b < 4; ++b)
-            slotEqBandDb[(size_t)(si * 4 + b)] = state.getRawParameterValue(pfx + juce::String(b));
+        {
+            const juce::String eid = pfx + juce::String(b);
+            const size_t flat = (size_t)(si * 4 + b);
+            slotEqBandDb[flat] = state.getRawParameterValue(eid);
+            slotEqBandParamF[flat] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter(eid));
+        }
     }
+}
+
+void FxEngine::ensureProcessingSpace(int numSamples) noexcept
+{
+    if (numSamples <= maxBlockSize)
+        return;
+    maxBlockSize = numSamples;
+    scratchLayerStereo.setSize(2, maxBlockSize, false, false, true);
+    scratchMixStereo.setSize(2, maxBlockSize, false, false, true);
+    scratchReverbWet.setSize(2, maxBlockSize, false, false, true);
+    const uint32_t mb = (uint32_t)maxBlockSize;
+    for (auto& s : slotDSPs)
+        s->prepare(sampleRate, mb);
 }
 
 void FxEngine::prepare(double sr, int maxBlock, juce::AudioProcessorValueTreeState& state)
@@ -258,7 +297,10 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
 
         if (t == FxUnitType::Reverb || t == FxUnitType::ReverbPlate || t == FxUnitType::ReverbSpring)
         {
+            const int revKey = (t == FxUnitType::ReverbPlate) ? 1 : (t == FxUnitType::ReverbSpring) ? 2 : 0;
+            if (st.revPresetKey != revKey)
             {
+                st.revPresetKey = revKey;
                 juce::dsp::Reverb::Parameters p;
                 if (t == FxUnitType::ReverbPlate)
                 {
@@ -308,10 +350,10 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
         {
             const int flat = dspBaseIndex + s;
             st.updateEqIfNeeded(sr,
-                                readAP(slotEqBandDb[(size_t)(flat * 4 + 0)], 0.f),
-                                readAP(slotEqBandDb[(size_t)(flat * 4 + 1)], 0.f),
-                                readAP(slotEqBandDb[(size_t)(flat * 4 + 2)], 0.f),
-                                readAP(slotEqBandDb[(size_t)(flat * 4 + 3)], 0.f));
+                                readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 0)], slotEqBandParamF[(size_t)(flat * 4 + 0)], 0.f),
+                                readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 1)], slotEqBandParamF[(size_t)(flat * 4 + 1)], 0.f),
+                                readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 2)], slotEqBandParamF[(size_t)(flat * 4 + 2)], 0.f),
+                                readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 3)], slotEqBandParamF[(size_t)(flat * 4 + 3)], 0.f));
         }
 
         for (int i = 0; i < numSamples; ++i)
@@ -562,8 +604,8 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
     const int n = juce::jmin(layerBus.getNumSamples(), outStereo.getNumSamples());
     if (n < 1 || layerBus.getNumChannels() < 8 || outStereo.getNumChannels() < 1)
         return;
-    if (n > maxBlockSize)
-        return;
+
+    ensureProcessingSpace(n);
 
     cacheRoutingForBlock(apvtsRef);
 
@@ -581,7 +623,8 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
         for (int s = 0; s < 4; ++s)
         {
             lt[(size_t)s] = cachedLayerType[(size_t)(L * 4 + s)];
-            lm[(size_t)s] = readAP(layerMixPtrs[(size_t)(L * 4 + s)], 0.f);
+            const size_t mixIx = (size_t)(L * 4 + s);
+            lm[(size_t)s] = readFloatAP(layerMixPtrs[mixIx], layerMixParamF[mixIx], 0.f);
         }
         processRack(scratchLayerStereo, L * 4, lt, lm, n);
 
@@ -594,7 +637,7 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
     for (int c = 0; c < 4; ++c)
     {
         ct[(size_t)c] = cachedCommonType[(size_t)c];
-        float base = readAP(commonMixPtrs[c], 0.f);
+        float base = readFloatAP(commonMixPtrs[c], commonMixParamF[c], 0.f);
         if (c == 0)
             base = juce::jlimit(0.f, 1.f, base + fxReverbMixAdd);
         else if (c == 1)
@@ -610,7 +653,8 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
     for (int m = 0; m < 4; ++m)
     {
         mt[(size_t)m] = cachedMasterType[(size_t)m];
-        mm[(size_t)m] = readAP(masterMixPtrs[(size_t)m], 0.f);
+        mm[(size_t)m] = readFloatAP(masterMixPtrs[(size_t)m], masterMixParamF[(size_t)m],
+                                    m == 0 ? 1.f : 0.f);
     }
     processRack(scratchMixStereo, 20, mt, mm, n);
 

@@ -6,6 +6,11 @@
 #include <array>
 #include <atomic>
 
+namespace juce
+{
+class AudioParameterFloat;
+}
+
 namespace wolfsden
 {
 
@@ -20,6 +25,15 @@ struct ParamPointers
     std::atomic<float>* lfoRate = nullptr;
     std::atomic<float>* lfoDepth = nullptr;
     std::atomic<float>* lfoShape = nullptr;
+
+    juce::AudioParameterFloat* masterPitchF = nullptr;
+    juce::AudioParameterFloat* masterVolF = nullptr;
+    juce::AudioParameterFloat* filterAdsrAF = nullptr;
+    juce::AudioParameterFloat* filterAdsrDF = nullptr;
+    juce::AudioParameterFloat* filterAdsrSF = nullptr;
+    juce::AudioParameterFloat* filterAdsrRF = nullptr;
+    juce::AudioParameterFloat* lfoRateF = nullptr;
+    juce::AudioParameterFloat* lfoDepthF = nullptr;
 
     std::atomic<float>* layerVol[4] {};
     std::atomic<float>* layerPan[4] {};
@@ -40,6 +54,20 @@ struct ParamPointers
     std::atomic<float>* layerAD[4] {};
     std::atomic<float>* layerAS[4] {};
     std::atomic<float>* layerAR[4] {};
+
+    juce::AudioParameterFloat* layerVolF[4] {};
+    juce::AudioParameterFloat* layerPanF[4] {};
+    juce::AudioParameterFloat* layerFineF[4] {};
+    juce::AudioParameterFloat* layerCutoffF[4] {};
+    juce::AudioParameterFloat* layerResF[4] {};
+    juce::AudioParameterFloat* layerLfo2RateF[4] {};
+    juce::AudioParameterFloat* layerLfo2DepthF[4] {};
+    juce::AudioParameterFloat* layerUnisonDetuneF[4] {};
+    juce::AudioParameterFloat* layerUnisonSpreadF[4] {};
+    juce::AudioParameterFloat* layerAAF[4] {};
+    juce::AudioParameterFloat* layerADF[4] {};
+    juce::AudioParameterFloat* layerASF[4] {};
+    juce::AudioParameterFloat* layerARF[4] {};
 };
 
 class VoiceLayer
@@ -136,6 +164,10 @@ private:
     float lastAmpEnvOut = 0.f;
     float lastFiltEnvOut = 0.f;
 
+    double smoothedVol = -1.0;
+    double smoothedPan = 0.0;
+    double smoothedCut = -1.0;
+
     WDSamplePlayer samplePlayer;
 
     void updateAdsrTargets(int layerIndex, const ParamPointers& p) noexcept;
@@ -145,7 +177,6 @@ private:
     static void setBiquadIdentity(wolfsden::dsp::Biquad& b) noexcept;
     void spawnGrain() noexcept;
     double processGranular(double hz) noexcept;
-    static float readP(std::atomic<float>* ap, float defV = 0) noexcept;
 };
 
 } // namespace wolfsden

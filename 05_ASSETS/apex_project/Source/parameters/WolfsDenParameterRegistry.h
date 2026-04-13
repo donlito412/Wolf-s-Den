@@ -25,6 +25,9 @@ enum class Registry : uint32_t
     theory_scale_type = 0x01000302u,
     theory_chord_type = 0x01000303u,
     theory_voice_leading = 0x01000304u,
+    theory_chord_root_anchor = 0x01000305u,
+    theory_chord_octave_shift = 0x01000306u,
+    theory_chord_density = 0x01000307u,
 
     midi_keys_lock_mode = 0x01000401u,
     midi_chord_mode = 0x01000402u,

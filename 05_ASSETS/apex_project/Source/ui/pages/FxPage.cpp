@@ -1,6 +1,7 @@
 #include "FxPage.h"
 
 #include "../../PluginProcessor.h"
+#include "../theme/WolfsDenLookAndFeel.h"
 
 namespace wolfsden::ui
 {
@@ -9,8 +10,9 @@ namespace
 void styleKnob(juce::Slider& s)
 {
     s.setSliderStyle(juce::Slider::RotaryVerticalDrag);
+    WolfsDenLookAndFeel::configureRotarySlider(s);
     s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 54, 20);
-    s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentPrimary());
+    s.setColour(juce::Slider::rotarySliderFillColourId, Theme::accentAlt());
     s.setColour(juce::Slider::thumbColourId, Theme::accentHot());
 }
 
@@ -146,6 +148,19 @@ FxPage::FxPage(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(addFxBtn);
     addFxBtn.setVisible(false); // shown only when a slot is expanded
 
+    auto prepMixLbl = [](juce::Label& L, const juce::String& t) {
+        L.setText(t, juce::dontSendNotification);
+        L.setFont(Theme::fontLabel());
+        L.setColour(juce::Label::textColourId, Theme::textSecondary());
+        L.setJustificationType(juce::Justification::centred);
+    };
+    prepMixLbl(lblRevMix, "Reverb");
+    prepMixLbl(lblDelMix, "Delay");
+    prepMixLbl(lblChoMix, "Chorus");
+    prepMixLbl(lblCompMix, "Comp");
+    for (auto* L : { &lblRevMix, &lblDelMix, &lblChoMix, &lblCompMix })
+        addAndMakeVisible(*L);
+
     // Legacy mix knobs
     for (auto* s : { &revMix, &delMix, &choMix, &compMix })
     {
@@ -183,13 +198,13 @@ void FxPage::rebuildRack()
         row->lab.setFont(Theme::fontPanelHeader());
         row->lab.setColour(juce::Label::textColourId, Theme::textPrimary());
 
-        styleKnob(row->mix);
+        styleH(row->mix);
         row->onOff.setToggleState(true, juce::dontSendNotification);
 
         const juce::String typeId = pfx + "type";
         const juce::String mixId  = pfx + "mix";
         
-        for (auto& s : juce::StringArray({
+        for (auto& typeName : juce::StringArray({
             "Off", "Compressor", "Limiter", "Gate", "Parametric EQ (4-band)", 
             "HPF (12 dB/oct)", "LPF (12 dB/oct)", "Soft Clip", "Hard Clip", 
             "Bit Crusher", "Waveshaper", "Chorus", "Flanger", "Phaser", "Vibrato", 
@@ -197,7 +212,7 @@ void FxPage::rebuildRack()
             "Reverb (algorithmic hall)", "Reverb (bright / plate-style)", 
             "Reverb (spring-style decay)", "Stereo width", "Mono blend (L+R)"
         }))
-            row->type.addItem(s, row->type.getNumItems() + 1);
+            row->type.addItem(typeName, row->type.getNumItems() + 1);
 
         if (apvts.getParameter(typeId) != nullptr)
             row->cAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, typeId, row->type);
@@ -230,8 +245,14 @@ void FxPage::rebuildRack()
 
         row->expandBtn.onClick = [this, s] { expandSlot(s); };
 
+        row->mixLabel.setText("Mix", juce::dontSendNotification);
+        row->mixLabel.setFont(Theme::fontLabel());
+        row->mixLabel.setColour(juce::Label::textColourId, Theme::textSecondary());
+        row->mixLabel.setJustificationType(juce::Justification::centred);
+
         addAndMakeVisible(row->lab);
         addAndMakeVisible(row->type);
+        addAndMakeVisible(row->mixLabel);
         addAndMakeVisible(row->mix);
         addAndMakeVisible(row->onOff);
         addAndMakeVisible(row->expandBtn);
@@ -383,11 +404,11 @@ void FxPage::paint(juce::Graphics& g)
 
     // Slot panel backgrounds
     auto slotsR = getLocalBounds().reduced(12);
-    slotsR.removeFromTop(28 + 32 + 24 + 8 + 72);
+    slotsR.removeFromTop(28 + 32 + 24 + 8 + 86);
     for (int i = 0; i < (int)slots.size(); ++i)
     {
         auto slotBounds = slots[(size_t)i]->lab.getBounds().withRight(getWidth() - 12).withHeight(
-            expandedSlot == i ? 120 : 60);
+            expandedSlot == i ? 126 : 66);
         g.setColour(Theme::backgroundMid().withAlpha(0.3f));
         g.fillRoundedRectangle(slotBounds.toFloat().reduced(2.f), 6.f);
     }
@@ -407,16 +428,33 @@ void FxPage::resized()
     r.removeFromTop(24 + 8); // signal flow + gap
 
     // Legacy mix knobs (shown on Common rack)
-    auto legRow = r.removeFromTop(72);
+    constexpr int kMixCap = 12;
+    auto legRow = r.removeFromTop(86);
     const int qw = juce::jmax(72, legRow.getWidth() / 4);
-    revMix.setBounds(legRow.removeFromLeft(qw).reduced(4, 2));
-    delMix.setBounds(legRow.removeFromLeft(qw).reduced(4, 2));
-    choMix.setBounds(legRow.removeFromLeft(qw).reduced(4, 2));
-    compMix.setBounds(legRow.removeFromLeft(qw).reduced(4, 2));
+    {
+        auto c = legRow.removeFromLeft(qw).reduced(4, 2);
+        lblRevMix.setBounds(c.removeFromTop(kMixCap));
+        revMix.setBounds(c);
+    }
+    {
+        auto c = legRow.removeFromLeft(qw).reduced(4, 2);
+        lblDelMix.setBounds(c.removeFromTop(kMixCap));
+        delMix.setBounds(c);
+    }
+    {
+        auto c = legRow.removeFromLeft(qw).reduced(4, 2);
+        lblChoMix.setBounds(c.removeFromTop(kMixCap));
+        choMix.setBounds(c);
+    }
+    {
+        auto c = legRow.removeFromLeft(qw).reduced(4, 2);
+        lblCompMix.setBounds(c.removeFromTop(kMixCap));
+        compMix.setBounds(c);
+    }
     r.removeFromTop(8);
 
     // FX slots
-    constexpr int kCollapsedH   = 60;
+    constexpr int kCollapsedH   = 66;
     constexpr int kExpandedH    = 160;  // header (60) + params panel (100)
 
     for (int i = 0; i < (int)slots.size(); ++i)
@@ -431,7 +469,9 @@ void FxPage::resized()
         slots[(size_t)i]->lab.setBounds(top.removeFromLeft(60).reduced(2, 14));
         slots[(size_t)i]->type.setBounds(top.removeFromLeft(juce::jmax(220, top.getWidth() * 55 / 100)).reduced(2, 8));
         slots[(size_t)i]->expandBtn.setBounds(top.removeFromRight(36).reduced(4, 12));
-        slots[(size_t)i]->mix.setBounds(top.reduced(4, 2));
+        auto mixCol = top.reduced(4, 2);
+        slots[(size_t)i]->mixLabel.setBounds(mixCol.removeFromTop(11));
+        slots[(size_t)i]->mix.setBounds(mixCol.removeFromTop(juce::jmax(22, mixCol.getHeight())));
 
         // Expanded panel
         if (slots[(size_t)i]->panel)

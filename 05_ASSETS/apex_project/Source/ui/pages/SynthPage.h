@@ -127,6 +127,17 @@ private:
     juce::Label lblDrivePlanGap;
     juce::Label lblLfoPlanGap;
 
+    /** Short captions above rotaries / LFO (ADSR uses attachToComponent on sliders). */
+    juce::Label lblOct, lblSemi, lblFine;
+    juce::Label lblCut1, lblRes1, lblDrv1;
+    juce::Label lblCut2, lblRes2, lblDrv2;
+    juce::Label lblFilAtk, lblFilDec, lblFilSus, lblFilRel;
+    juce::Label lblAmpAtk, lblAmpDec, lblAmpSus, lblAmpRel;
+    juce::Label lblUniV, lblUniDet, lblUniSpr;
+    juce::Label lblLevel, lblPan;
+    juce::Label lblL1R, lblL1D, lblL1Sh;
+    juce::Label lblL2R, lblL2D, lblL2Sh;
+
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> globalSAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> globalCAtt;
 

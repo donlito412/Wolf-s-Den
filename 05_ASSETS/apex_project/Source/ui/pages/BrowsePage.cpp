@@ -559,12 +559,12 @@ void BrowsePage::resized()
 
 juce::Colour BrowsePage::categoryAccentColour (const juce::String& cat)
 {
-    if (cat == "Bass")      return juce::Colour (0xff6366f1);  // indigo
+    if (cat == "Bass")      return juce::Colour (0xff22d3ee);  // cyan (was indigo)
     if (cat == "Keys")      return juce::Colour (0xffeab308);  // amber
     if (cat == "Leads")     return juce::Colour (0xffef4444);  // red
     if (cat == "Pads")      return juce::Colour (0xff38bdf8);  // sky
     if (cat == "Plucks")    return juce::Colour (0xff2dd4bf);  // teal
-    if (cat == "Strings")   return juce::Colour (0xffc084fc);  // violet
+    if (cat == "Strings")   return juce::Colour (0xff67e8f9);  // light cyan (was violet)
     if (cat == "Horns")     return juce::Colour (0xfffb923c);  // orange
     if (cat == "Woodwinds") return juce::Colour (0xff4ade80);  // green
     return Theme::accentAlt();
@@ -999,7 +999,7 @@ juce::Colour BrowsePage::moodAccentColour(const juce::String& mood)
     if (mood == "Calm") return juce::Colour(0xff2dd4bf);
     if (mood == "Energetic") return Theme::error().withAlpha(0.85f);
     if (mood == "Peaceful") return Theme::accentAlt();
-    if (mood == "Soulful") return juce::Colour(0xffc4b5fd);
+    if (mood == "Soulful") return juce::Colour(0xff72d6ff); // accent cyan (was lavender)
     if (mood == "Sophisticated") return juce::Colour(0xff94a3b8);
     return Theme::accentAlt();
 }

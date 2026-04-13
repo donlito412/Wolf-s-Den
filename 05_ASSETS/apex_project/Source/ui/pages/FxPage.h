@@ -65,7 +65,8 @@ private:
     {
         juce::Label lab;
         juce::ComboBox type;
-        juce::Slider mix { juce::Slider::RotaryVerticalDrag, juce::Slider::TextBoxBelow };
+        juce::Label mixLabel;
+        juce::Slider mix { juce::Slider::LinearHorizontal, juce::Slider::TextBoxRight };
         juce::ToggleButton onOff { "On" };
         juce::TextButton expandBtn { "…" };
         std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> cAtt;
@@ -79,6 +80,8 @@ private:
     // Add FX button + popup browser
     juce::TextButton addFxBtn { "+ Add FX" };
     void showAddFxBrowser(int slotIndex);
+
+    juce::Label lblRevMix, lblDelMix, lblChoMix, lblCompMix;
 
     // Legacy common-rack mix sliders (reverb/delay/chorus/compressor)
     juce::Slider revMix { juce::Slider::RotaryVerticalDrag, juce::Slider::TextBoxBelow };

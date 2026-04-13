@@ -67,7 +67,7 @@ juce::Colour sourceRowColour(S src)
 {
     switch (src)
     {
-        case S::GlobalLFO:   return Theme::accentPrimary().withAlpha(0.15f);  // Purple for LFO
+        case S::GlobalLFO:   return Theme::accentPrimary().withAlpha(0.15f);  // Cyan for LFO
         case S::FilterEnv:
         case S::AmpEnv:      return juce::Colour(0xff2dd4bf).withAlpha(0.15f); // Teal for envelopes
         case S::ModWheel:
@@ -226,12 +226,12 @@ void ModPage::paint(juce::Graphics& g)
     // Page title
     g.setColour(Theme::textPrimary());
     g.setFont(Theme::fontPageHeader());
-    g.drawText("Modulation", getLocalBounds().removeFromTop(26).reduced(10, 0), juce::Justification::centredLeft);
+    g.drawText("Modulation", getLocalBounds().removeFromTop(26).reduced(14, 0), juce::Justification::centredLeft);
 
     // Color-coded row backgrounds
-    auto r = getLocalBounds().reduced(10);
+    auto r = getLocalBounds().reduced(14, 12);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(420, (int)((float)r.getWidth() * 0.42f));
+    const int leftW = juce::jmin(480, juce::jmax(340, (int)((float)r.getWidth() * 0.46f)));
     auto left = r.withWidth(leftW);
     left.removeFromTop(28); // match resized title push down
     left.removeFromTop(32); // slot page combo + gap
@@ -269,9 +269,9 @@ void ModPage::paint(juce::Graphics& g)
     // Matrix column headers — positioned after slotPage (26) + gap (6)
     const int hdrY = r.getY() + 26 + 6;
     const int aw = leftW;
-    const int srcW  = juce::jmax(78, aw * 24 / 100);
-    const int tgtW  = juce::jmax(132, aw * 40 / 100);
-    const int amtW  = juce::jmax(64, aw * 20 / 100);
+    const int srcW  = juce::jmax(92, aw * 26 / 100);
+    const int tgtW  = juce::jmax(138, aw * 38 / 100);
+    const int amtW  = juce::jmax(72, aw * 22 / 100);
     auto hdrR = juce::Rectangle<int>(r.getX(), hdrY, aw, 14);
     auto h = hdrR;
     g.setColour(Theme::textSecondary());
@@ -286,9 +286,9 @@ void ModPage::paint(juce::Graphics& g)
 
 void ModPage::resized()
 {
-    auto r = getLocalBounds().reduced(10);
+    auto r = getLocalBounds().reduced(14, 12);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(420, (int)((float)r.getWidth() * 0.42f));
+    const int leftW = juce::jmin(480, juce::jmax(340, (int)((float)r.getWidth() * 0.46f)));
     r.removeFromTop(28); // match title space
     
     auto left = r.removeFromLeft(leftW);
@@ -302,9 +302,9 @@ void ModPage::resized()
     const int rowH = 28;
     // Scale columns proportionally to available width
     const int aw = left.getWidth();
-    const int srcW  = juce::jmax(78, aw * 24 / 100);
-    const int tgtW  = juce::jmax(132, aw * 40 / 100);
-    const int amtW  = juce::jmax(64, aw * 20 / 100);
+    const int srcW  = juce::jmax(92, aw * 26 / 100);
+    const int tgtW  = juce::jmax(138, aw * 38 / 100);
+    const int amtW  = juce::jmax(72, aw * 22 / 100);
     const int invW  = 32;
     const int mutW  = 26;
     const int scpW  = juce::jmax(46, aw - srcW - tgtW - amtW - invW - mutW);

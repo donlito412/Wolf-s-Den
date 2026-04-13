@@ -18,6 +18,9 @@ class WolfsDenLookAndFeel : public juce::LookAndFeel_V4,
 {
 public:
     WolfsDenLookAndFeel();
+
+    /** Min at bottom-left (~7:30); 270° clockwise sweep (JUCE: radians CW from 12 o'clock). Call from every rotary `styleKnob`. */
+    static void configureRotarySlider(juce::Slider& s) noexcept;
     void drawRotarySlider(juce::Graphics& g,
                           int x,
                           int y,

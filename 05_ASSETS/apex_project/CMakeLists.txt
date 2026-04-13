@@ -4,7 +4,7 @@ project(WolfsDen VERSION 1.0.5 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(WOLFS_DEN_PRODUCTS_DIR "${CMAKE_SOURCE_DIR}/Products" CACHE PATH "Wolf's Den: VST3, AU, Standalone (and AAX if built) — all under apex_project/Products")
+set(WOLFS_DEN_PRODUCTS_DIR "${CMAKE_SOURCE_DIR}/Products" CACHE PATH "Howling Wolves: VST3, AU, Standalone (and AAX if built) — all under apex_project/Products")
 
 if(APPLE)
     set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
@@ -43,7 +43,7 @@ juce_add_plugin(
     PLUGIN_CODE WfDn
     VERSION ${PROJECT_VERSION}
     FORMATS ${WOLFS_DEN_PLUGIN_FORMATS}
-    PRODUCT_NAME "Wolf's Den"
+    PRODUCT_NAME "Howling Wolves"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
@@ -56,7 +56,7 @@ juce_add_plugin(
 
 message(
     STATUS
-    "Wolf's Den: run cmake --build with target WolfsDen_ship (or WolfsDen_VST3). "
+    "Howling Wolves: run cmake --build with target WolfsDen_ship (or WolfsDen_VST3). "
     "Target WolfsDen is JUCE shared code only — it does not produce or redeploy the .vst3."
 )
 
@@ -75,8 +75,8 @@ if(APPLE)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_VST3>"
-                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.vst3"
-                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Wolf's Den.vst3"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves.vst3"
+                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Howling Wolves.vst3"
                 "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
                 -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
             COMMENT "Wolf's Den: VST3 -> Products/ + ~/Library/Audio/Plug-Ins/VST3/"
@@ -91,8 +91,8 @@ if(APPLE)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AU>"
-                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.component"
-                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/Components/Wolf's Den.component"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves.component"
+                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/Components/Howling Wolves.component"
                 "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
                 -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
             COMMENT "Wolf's Den: AU -> Products/ + ~/Library/Audio/Plug-Ins/Components/"
@@ -107,7 +107,7 @@ if(APPLE)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_Standalone>"
-                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/WolfsDen.app"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves.app"
                 "-DDST_USER="
                 "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
                 -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
@@ -249,3 +249,9 @@ source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}/Source" PREFIX "Source" FILES
     Source/ui/pages/TheoryPage.cpp
     Source/ui/pages/ModPage.cpp
 )
+
+option(WOLFS_DEN_BUILD_TESTS "Build WolfsDenTests and register CTest" ON)
+if(WOLFS_DEN_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(Tests)
+endif()

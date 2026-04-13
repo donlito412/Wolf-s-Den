@@ -77,14 +77,20 @@ private:
                      const std::array<float, kFxSlotsPerRack>& mixes,
                      int numSamples) noexcept;
 
+    /** If host block exceeds prepared size, grow scratch buffers + DSP (rare; avoids silence / stale output). */
+    void ensureProcessingSpace(int numSamples) noexcept;
+
     juce::AudioProcessorValueTreeState* apvts = nullptr;
     double sampleRate = 44100.0;
     int maxBlockSize = 512;
     bool prepared = false;
 
     std::array<std::atomic<float>*, (size_t)(kFxNumLayerRacks * kFxSlotsPerRack)> layerMixPtrs {};
+    std::array<juce::AudioParameterFloat*, (size_t)(kFxNumLayerRacks * kFxSlotsPerRack)> layerMixParamF {};
     std::array<std::atomic<float>*, (size_t)kFxNumMasterSlots> masterMixPtrs {};
+    std::array<juce::AudioParameterFloat*, (size_t)kFxNumMasterSlots> masterMixParamF {};
     std::atomic<float>* commonMixPtrs[4] {};
+    juce::AudioParameterFloat* commonMixParamF[4] {};
 
     std::array<int, (size_t)(kFxNumLayerRacks * kFxSlotsPerRack)> cachedLayerType {};
     std::array<int, (size_t)kFxNumCommonSlots> cachedCommonType {};
@@ -92,6 +98,7 @@ private:
 
     /** Per FX slot (0–23) × 4 bands: parametric EQ gain in dB (`fx_sNN_eq0`…`eq3`). */
     std::array<std::atomic<float>*, 96> slotEqBandDb {};
+    std::array<juce::AudioParameterFloat*, 96> slotEqBandParamF {};
 
     std::vector<std::unique_ptr<SlotDSP>> slotDSPs;
 

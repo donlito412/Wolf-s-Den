@@ -1,5 +1,6 @@
 #include "VoiceLayer.h"
 
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
 
 #include <cmath>
@@ -8,34 +9,42 @@ namespace wolfsden
 {
 namespace
 {
-/** APVTS raw for AudioParameterChoice is normalized 0..1 — never cast to int directly. */
+/** APVTS getRawParameterValue() is denormalised (JUCE 8). Choice index is usually a whole float in range. */
 inline int readChoiceIndex(std::atomic<float>* ap, int numItems, int defIdx) noexcept
 {
     if (!ap || numItems < 2)
         return defIdx;
-    const float n = ap->load(std::memory_order_relaxed);
-    if (n > 1.0001f)
-        return juce::jlimit(0, numItems - 1, (int)std::lround(n));
-    return juce::jlimit(0, numItems - 1, (int)(n * (float)numItems * 0.9999f));
+    const float v = ap->load(std::memory_order_relaxed);
+    if (v >= 0.f && v <= 1.0001f)
+        return juce::jlimit(0, numItems - 1, (int)(v * (float)numItems * 0.9999f));
+    return juce::jlimit(0, numItems - 1, (int)std::lround(v));
 }
 
-/** APVTS raw for AudioParameterInt is normalized from min..max. */
+/** Int params: denormalised value is physical integer as float; 0..1 treated as legacy normalised span. */
 inline int readIntFromNorm(std::atomic<float>* ap, int minV, int maxV, int defV) noexcept
 {
     if (!ap || maxV < minV)
         return defV;
-    const float n = ap->load(std::memory_order_relaxed);
-    if (n > 1.0001f)
-        return juce::jlimit(minV, maxV, (int)std::lround(n));
-    const int span = maxV - minV;
-    return juce::jlimit(minV, maxV, minV + (int)std::lround(n * (float)span));
+    const float v = ap->load(std::memory_order_relaxed);
+    if (v >= 0.f && v <= 1.0001f && maxV > minV)
+        return juce::jlimit(minV, maxV, minV + (int)std::lround(v * (float)(maxV - minV)));
+    return juce::jlimit(minV, maxV, (int)std::lround(v));
+}
+
+/** Float params: atomic already holds physical value (APVTS raw denormalised). */
+inline float readFloatAP(std::atomic<float>* ap, juce::AudioParameterFloat* pf, float defV) noexcept
+{
+    if (!ap)
+        return defV;
+    const float v = ap->load(std::memory_order_relaxed);
+    if (pf != nullptr)
+    {
+        const auto r = pf->getNormalisableRange();
+        return juce::jlimit(r.start, r.end, v);
+    }
+    return v;
 }
 } // namespace
-
-float VoiceLayer::readP(std::atomic<float>* ap, float defV) noexcept
-{
-    return ap ? ap->load(std::memory_order_relaxed) : defV;
-}
 
 void VoiceLayer::setBiquadIdentity(dsp::Biquad& b) noexcept
 {
@@ -85,6 +94,9 @@ void VoiceLayer::reset() noexcept
     f2.reset();
     cachedAmpA = cachedAmpD = cachedAmpS = cachedAmpR = -1.f;
     cachedFilA = cachedFilD = cachedFilS = cachedFilR = -1.f;
+    smoothedVol = -1.0;
+    smoothedPan = 0.0;
+    smoothedCut = -1.0;
 }
 
 void VoiceLayer::noteOn(int midiNote, float velocity) noexcept
@@ -118,11 +130,12 @@ void VoiceLayer::noteOff() noexcept
 
 void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexcept
 {
-    const float aA = readP(p.layerAA[layerIndex], 0.1f);
-    const float aD = readP(p.layerAD[layerIndex], 0.1f);
-    const float aS = readP(p.layerAS[layerIndex], 0.8f);
-    const float aR = readP(p.layerAR[layerIndex], 0.2f);
-    if (aA != cachedAmpA || aD != cachedAmpD || aS != cachedAmpS || aR != cachedAmpR)
+    const float aA = readFloatAP(p.layerAA[layerIndex], p.layerAAF[layerIndex], 0.01f);
+    const float aD = readFloatAP(p.layerAD[layerIndex], p.layerADF[layerIndex], 0.1f);
+    const float aS = readFloatAP(p.layerAS[layerIndex], p.layerASF[layerIndex], 0.8f);
+    const float aR = readFloatAP(p.layerAR[layerIndex], p.layerARF[layerIndex], 0.2f);
+    const float ampEpsilon = 1e-6f;
+    if (std::fabs(aA - cachedAmpA) > ampEpsilon || std::fabs(aD - cachedAmpD) > ampEpsilon || std::fabs(aS - cachedAmpS) > ampEpsilon || std::fabs(aR - cachedAmpR) > ampEpsilon)
     {
         ampAdsr.setParameters(aA, aD, aS, aR);
         cachedAmpA = aA;
@@ -131,11 +144,12 @@ void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexc
         cachedAmpR = aR;
     }
 
-    const float fA = readP(p.filterAdsrA, 0.1f);
-    const float fD = readP(p.filterAdsrD, 0.1f);
-    const float fS = readP(p.filterAdsrS, 0.7f);
-    const float fR = readP(p.filterAdsrR, 0.15f);
-    if (fA != cachedFilA || fD != cachedFilD || fS != cachedFilS || fR != cachedFilR)
+    const float fA = readFloatAP(p.filterAdsrA, p.filterAdsrAF, 0.01f);
+    const float fD = readFloatAP(p.filterAdsrD, p.filterAdsrDF, 0.1f);
+    const float fS = readFloatAP(p.filterAdsrS, p.filterAdsrSF, 0.7f);
+    const float fR = readFloatAP(p.filterAdsrR, p.filterAdsrRF, 0.15f);
+    const float filtEpsilon = 1e-6f;
+    if (std::fabs(fA - cachedFilA) > filtEpsilon || std::fabs(fD - cachedFilD) > filtEpsilon || std::fabs(fS - cachedFilS) > filtEpsilon || std::fabs(fR - cachedFilR) > filtEpsilon)
     {
         filtAdsr.setParameters(fA, fD, fS, fR);
         cachedFilA = fA;
@@ -214,8 +228,8 @@ double VoiceLayer::processGranular(double hz) noexcept
 double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept
 {
     const int nv = readIntFromNorm(p.layerUnisonVoices[layerIdx], 1, 8, 1);
-    const double detMax = (double)readP(p.layerUnisonDetune[layerIdx], 25.f);
-    const float spN = readP(p.layerUnisonSpread[layerIdx], 0.5f);
+    const double detMax = (double)readFloatAP(p.layerUnisonDetune[layerIdx], p.layerUnisonDetuneF[layerIdx], 25.f);
+    const float spN = readFloatAP(p.layerUnisonSpread[layerIdx], p.layerUnisonSpreadF[layerIdx], 0.5f);
     const double spreadMul = 0.25 + 1.75 * (double)std::clamp(spN, 0.f, 1.f);
     const double detNominalHalf = 0.5 * detMax * spreadMul;
 
@@ -228,7 +242,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
     };
 
     const double inc = hz / sr;
-    const double fmIndex = (double)readP(p.layerRes[layerIdx], 1.f) * 0.35;
+    const double fmIndex = (double)readFloatAP(p.layerRes[layerIdx], p.layerResF[layerIdx], 1.f) * 0.35;
 
     switch (oscType)
     {
@@ -438,9 +452,9 @@ void VoiceLayer::renderAdd(double& outL,
     updateAdsrTargets(layerIndex, p);
 
     // Master pitch (global) + per-layer coarse + mod matrix pitch (vibrato)
-    const double masterPitchSemi = (double)readP(p.masterPitch, 0.f);
+    const double masterPitchSemi = (double)readFloatAP(p.masterPitch, p.masterPitchF, 0.f);
     const int coarse = readIntFromNorm(p.layerCoarse[layerIndex], -24, 24, 0);
-    const double fineCents = (double)readP(p.layerFine[layerIndex], 0.f);
+    const double fineCents = (double)readFloatAP(p.layerFine[layerIndex], p.layerFineF[layerIndex], 0.f);
 
     // Combine integer semitone offsets; fractional mod pitch handled via pow(2, semis/12)
     double hz = dsp::midiNoteToHz(midiNote + coarse + (int)std::lround(masterPitchSemi));
@@ -457,22 +471,26 @@ void VoiceLayer::renderAdd(double& outL,
 
     const int lfoSh = readChoiceIndex(p.lfoShape, 6, 0);
     lfoLayer.setShape(juce::jlimit(0, 5, lfoSh));
-    const float lfoDep = readP(p.lfoDepth, 0.f);
+    const float lfoDep = readFloatAP(p.lfoDepth, p.lfoDepthF, 0.f);
     const double layerLfo = lfoLayer.tick(0.23 + 0.11 * (double)layerIndex);
 
     const int lfo2Sh = readChoiceIndex(p.layerLfo2Shape[layerIndex], 6, 0);
     lfoLayer2.setShape(juce::jlimit(0, 5, lfo2Sh));
-    const float lfo2DepN = readP(p.layerLfo2Depth[layerIndex], 0.f);
-    const double lfo2Hz = (double)readP(p.layerLfo2Rate[layerIndex], 2.f);
+    const float lfo2DepN = readFloatAP(p.layerLfo2Depth[layerIndex], p.layerLfo2DepthF[layerIndex], 0.f);
+    const double lfo2Hz = (double)readFloatAP(p.layerLfo2Rate[layerIndex], p.layerLfo2RateF[layerIndex], 2.f);
     const double layerLfo2 = lfoLayer2.tick(lfo2Hz);
 
-    const double baseCut = (double)readP(p.layerCutoff[layerIndex], 5000.f);
-    const double resCtrl = (double)readP(p.layerRes[layerIndex], 1.f) + (double)modMatrixResAdd;
+    const double baseCut = (double)readFloatAP(p.layerCutoff[layerIndex], p.layerCutoffF[layerIndex], 5000.f);
+    if (smoothedCut < 0) smoothedCut = baseCut;
+    smoothedCut += (baseCut - smoothedCut) * 0.005;
+
+    const double resCtrl = (double)readFloatAP(p.layerRes[layerIndex], p.layerResF[layerIndex], 1.f)
+                           + (double)modMatrixResAdd;
     const double modSemi = filtEnv * 36.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
                            + (double)modMatrixCutSemi + layerLfo2 * 10.0 * (double)lfo2DepN;
 
     const int ftype = readChoiceIndex(p.layerFtype[layerIndex], 8, 0);
-    updateFilterCoeffs(ftype, baseCut, resCtrl, modSemi);
+    updateFilterCoeffs(ftype, smoothedCut, resCtrl, modSemi);
 
     const bool parallel = readChoiceIndex(p.layerFilterRoute[layerIndex], 2, 0) == 1;
 
@@ -496,15 +514,20 @@ void VoiceLayer::renderAdd(double& outL,
 
     double sig = y * (double)velocity * ampEnv;
 
-    const float vol = readP(p.layerVol[layerIndex], 0.75f);
-    const float pan = readP(p.layerPan[layerIndex], 0.5f);
-    sig *= (double)vol;
+    const float vol = readFloatAP(p.layerVol[layerIndex], p.layerVolF[layerIndex], 0.75f);
+    const float pan = readFloatAP(p.layerPan[layerIndex], p.layerPanF[layerIndex], 0.f);
+    
+    if (smoothedVol < 0) smoothedVol = (double)vol;
+    smoothedVol += ((double)vol - smoothedVol) * 0.005;
+    smoothedPan += ((double)pan - smoothedPan) * 0.005;
+
+    sig *= smoothedVol;
 
     // Apply mod matrix amplitude modulation (tremolo): multiplicative, clamped [0, 2]
     sig *= (double)juce::jlimit(0.f, 2.f, modMatrixAmpMul);
 
     // Apply mod matrix pan modulation (auto-pan): additive bipolar offset clamped to [-1, 1]
-    const double panBip = std::clamp((double)pan + (double)modMatrixPanAdd, -1.0, 1.0);
+    const double panBip = std::clamp(smoothedPan + (double)modMatrixPanAdd, -1.0, 1.0);
     const double pan01 = (panBip + 1.0) * 0.5;
     const double angle = pan01 * dsp::twoPi * 0.25;
     outL += sig * std::cos(angle);

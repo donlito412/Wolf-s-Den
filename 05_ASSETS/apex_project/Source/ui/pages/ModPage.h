@@ -23,7 +23,7 @@ namespace wolfsden::ui
  * TASK_009 MOD page:
  *   Left 40%: Mod Matrix table (32 slots, paged 8-at-a-time)
  *     Columns: Source | → | Target | Amount | Inv | Smooth | Mute
- *     Color-coded rows: LFO=purple, Envelope=teal, MIDI=gold
+ *     Color-coded rows: LFO=cyan, Envelope=teal, MIDI=gold
  *     Red dot on target when out-of-range
  *
  *   Right 60%: XY Pad

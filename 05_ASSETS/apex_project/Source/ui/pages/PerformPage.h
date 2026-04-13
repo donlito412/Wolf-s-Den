@@ -81,6 +81,10 @@ private:
     WolfsDenAudioProcessor& processor;
     juce::AudioProcessorValueTreeState& apvts;
 
+    juce::Label lblChordInv;
+    juce::Label lblArpRate, lblArpPat, lblArpOct;
+    juce::Label lblStepVel, lblStepDur, lblStepTrn, lblStepRkt;
+
     // --- Keys Lock section ---
     juce::Label keysLockTitle;
     juce::ComboBox keysMode;

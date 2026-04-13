@@ -111,7 +111,8 @@ void WDSamplePlayer::loadNow (int sampleId, const juce::String& filePath,
         startFrame = startFr;
         endFrame   = endFr;
 
-        fillReadAhead();
+        // Do not fill readAheadBuf here — loadNow runs on a background thread; audio thread reads
+        // readAhead without lock in nextSampleMono/processBlock. Priming happens in startNote().
         loadedSampleId.store (sampleId, std::memory_order_release);
         // Audio thread clears cachedBuffer — cannot reset from here (render reads cache without lock).
         streamLoadNeedsCacheClear.store (true, std::memory_order_release);
@@ -174,7 +175,11 @@ void WDSamplePlayer::startNote (float pitchRatioFromRoot, float velocity) noexce
     pitchRatio = (double) pitchRatioFromRoot;
     velocity_  = velocity;
     readPos    = (double) startFrame;
-    if (streamReader) streamReadPos = startFrame;
+    if (streamReader)
+    {
+        streamReadPos = startFrame;
+        fillReadAhead(); // audio thread only — avoids racing bg loader writes to readAheadBuf
+    }
     active   = true;
     noteHeld = true;
 }

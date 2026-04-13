@@ -18,12 +18,24 @@ inline float readAP(std::atomic<float>* p, float d = 0.f) noexcept
     return p ? p->load(std::memory_order_relaxed) : d;
 }
 
-inline int readChoice(std::atomic<float>* p, int maxIndex, int defV = 0) noexcept
+inline int readIntNormAP(std::atomic<float>* p, int minV, int maxV, int defV) noexcept
 {
-    if (!p || maxIndex <= 0)
+    if (!p || maxV < minV)
         return defV;
-    const float n = p->load(std::memory_order_relaxed);
-    return juce::jlimit(0, maxIndex - 1, (int)(n * (float)maxIndex * 0.9999f));
+    const float v = p->load(std::memory_order_relaxed);
+    if (v >= 0.f && v <= 1.0001f && maxV > minV)
+        return juce::jlimit(minV, maxV, minV + (int)std::lround(v * (float)(maxV - minV)));
+    return juce::jlimit(minV, maxV, (int)std::lround(v));
+}
+
+inline int readChoice(std::atomic<float>* p, int numChoices, int defV = 0) noexcept
+{
+    if (!p || numChoices <= 0)
+        return defV;
+    const float v = p->load(std::memory_order_relaxed);
+    if (v >= 0.f && v <= 1.0001f)
+        return juce::jlimit(0, numChoices - 1, (int)(v * (float)numChoices * 0.9999f));
+    return juce::jlimit(0, numChoices - 1, (int)std::lround(v));
 }
 
 bool pitchClassInScale(int notePc, int rootPc, const int* iv, int nIv) noexcept
@@ -154,9 +166,13 @@ void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
 {
     arpRateParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_rate"));
     arpSwingParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_swing"));
+    arpPatternChoice = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_pattern"));
     ptrs.keysLockMode = apvts.getRawParameterValue("midi_keys_lock_mode");
     ptrs.chordMode = apvts.getRawParameterValue("midi_chord_mode");
     ptrs.chordType = apvts.getRawParameterValue("theory_chord_type");
+    ptrs.chordRootAnchor = apvts.getRawParameterValue("theory_chord_root_anchor");
+    ptrs.chordOctaveShift = apvts.getRawParameterValue("theory_chord_octave_shift");
+    ptrs.chordDensity = apvts.getRawParameterValue("theory_chord_density");
     ptrs.chordInversion = apvts.getRawParameterValue("midi_chord_inversion");
     ptrs.arpOn = apvts.getRawParameterValue("midi_arp_on");
     ptrs.arpRate = apvts.getRawParameterValue("midi_arp_rate");
@@ -192,10 +208,7 @@ int MidiPipeline::readStepVel(int stepIndex) const noexcept
     if (stepIndex < 0 || stepIndex >= kArpSteps)
         return 100;
     auto* p = arpStepPtrs[(size_t)stepIndex].vel;
-    if (!p)
-        return 100;
-    const float n = readAP(p, (100.f - 1.f) / 126.f);
-    return juce::jlimit(1, 127, (int)std::lround(1.f + n * 126.f));
+    return readIntNormAP(p, 1, 127, 100);
 }
 
 float MidiPipeline::readStepDur(int stepIndex) const noexcept
@@ -205,15 +218,13 @@ float MidiPipeline::readStepDur(int stepIndex) const noexcept
     auto* p = arpStepPtrs[(size_t)stepIndex].dur;
     if (!p)
         return 1.f;
-    const float n = readAP(p, 0.5f);
+    const float v = readAP(p, 1.f);
     if (auto* pf = arpStepDurParams[(size_t)stepIndex])
     {
         const auto r = pf->getNormalisableRange();
-        if (n > 1.0001f)
-            return juce::jlimit(r.start, r.end, n);
-        return juce::jlimit(r.start, r.end, pf->convertFrom0to1(n));
+        return juce::jlimit(r.start, r.end, v);
     }
-    return juce::jlimit(0.1f, 2.f, 0.1f + n * 1.9f);
+    return juce::jlimit(0.1f, 2.f, v);
 }
 
 int MidiPipeline::readStepTrn(int stepIndex) const noexcept
@@ -221,10 +232,7 @@ int MidiPipeline::readStepTrn(int stepIndex) const noexcept
     if (stepIndex < 0 || stepIndex >= kArpSteps)
         return 0;
     auto* p = arpStepPtrs[(size_t)stepIndex].trn;
-    if (!p)
-        return 0;
-    const float n = readAP(p, 0.5f);
-    return juce::jlimit(-24, 24, (int)std::lround(-24.f + n * 48.f));
+    return readIntNormAP(p, -24, 24, 0);
 }
 
 int MidiPipeline::readStepRkt(int stepIndex) const noexcept
@@ -232,10 +240,7 @@ int MidiPipeline::readStepRkt(int stepIndex) const noexcept
     if (stepIndex < 0 || stepIndex >= kArpSteps)
         return 1;
     auto* p = arpStepPtrs[(size_t)stepIndex].rkt;
-    if (!p)
-        return 1;
-    const float n = readAP(p, 0.f);
-    return juce::jlimit(1, 4, 1 + (int)std::lround(n * 3.f));
+    return readIntNormAP(p, 1, 4, 1);
 }
 
 void MidiPipeline::reset() noexcept
@@ -286,10 +291,24 @@ int MidiPipeline::readChordTypeIndex() const noexcept
     return readChoice(ptrs.chordType, kNumChordTypesUi, 0);
 }
 
+int MidiPipeline::readChordRootAnchor() const noexcept
+{
+    return readChoice(ptrs.chordRootAnchor, 13, 0);
+}
+
+int MidiPipeline::readChordOctaveShift() const noexcept
+{
+    return readIntNormAP(ptrs.chordOctaveShift, -2, 2, 0);
+}
+
+int MidiPipeline::readChordDensity() const noexcept
+{
+    return readIntNormAP(ptrs.chordDensity, 0, 4, 0);
+}
+
 int MidiPipeline::readChordInversion() const noexcept
 {
-    const float n = readAP(ptrs.chordInversion, 0.f);
-    return juce::jlimit(0, 3, (int)std::lround(n * 3.f));
+    return readIntNormAP(ptrs.chordInversion, 0, 3, 0);
 }
 
 bool MidiPipeline::readArpOn() const noexcept
@@ -301,21 +320,23 @@ float MidiPipeline::readArpRate() const noexcept
 {
     if (!ptrs.arpRate)
         return 4.f;
-    const float n = readAP(ptrs.arpRate, 0.5f);
+    const float v = readAP(ptrs.arpRate, 4.f);
     if (arpRateParam != nullptr)
     {
         const auto r = arpRateParam->getNormalisableRange();
-        // APVTS raw is usually normalized 0..1; treat n > 1 as already physical (compat / odd hosts).
-        if (n > 1.0f)
-            return juce::jlimit(r.start, r.end, n);
-        return juce::jlimit(r.start, r.end, arpRateParam->convertFrom0to1(n));
+        return juce::jlimit(r.start, r.end, v);
     }
-    return juce::jlimit(0.25f, 32.f, n);
+    return juce::jlimit(0.25f, 32.f, v);
 }
 
 MidiPipeline::ArpPattern MidiPipeline::readArpPattern() const noexcept
 {
-    return (ArpPattern)readChoice(ptrs.arpPattern, (int)ArpPattern::numPatterns, 0);
+    if (arpPatternChoice != nullptr)
+    {
+        const int n = (int)ArpPattern::numPatterns;
+        return (ArpPattern) juce::jlimit(0, n - 1, arpPatternChoice->getIndex());
+    }
+    return (ArpPattern) readChoice(ptrs.arpPattern, (int) ArpPattern::numPatterns, 0);
 }
 
 bool MidiPipeline::readArpLatch() const noexcept
@@ -325,21 +346,18 @@ bool MidiPipeline::readArpLatch() const noexcept
 
 float MidiPipeline::readArpSwing() const noexcept
 {
-    const float n = readAP(ptrs.arpSwing, 0.f);
+    const float v = readAP(ptrs.arpSwing, 0.f);
     if (arpSwingParam != nullptr)
     {
         const auto r = arpSwingParam->getNormalisableRange();
-        if (n > 1.0001f)
-            return juce::jlimit(r.start, r.end, n);
-        return juce::jlimit(r.start, r.end, arpSwingParam->convertFrom0to1(n));
+        return juce::jlimit(r.start, r.end, v);
     }
-    return juce::jlimit(0.f, 0.5f, n * 0.5f);
+    return juce::jlimit(0.f, 0.5f, v);
 }
 
 int MidiPipeline::readArpOctaves() const noexcept
 {
-    const float n = readAP(ptrs.arpOctaves, 0.f);
-    return juce::jlimit(1, 4, 1 + (int)std::lround(n * 3.f));
+    return readIntNormAP(ptrs.arpOctaves, 1, 4, 1);
 }
 
 std::optional<int> MidiPipeline::applyKeysLock(int note,
@@ -403,9 +421,8 @@ void MidiPipeline::buildChordNotes(int rootMidi,
 
     int absNotes[8];
     int n = juce::jmin(nIv, 8);
-    const int baseOct = (rootMidi / 12) * 12;
     for (int i = 0; i < n; ++i)
-        absNotes[i] = juce::jlimit(0, 127, baseOct + iv[i]);
+        absNotes[i] = juce::jlimit(0, 127, rootMidi + iv[i]);
 
     std::sort(absNotes, absNotes + n);
     const int inv = juce::jlimit(0, n - 1, inversion);
@@ -498,22 +515,29 @@ void MidiPipeline::allNotesOffOutput(juce::MidiBuffer& out, int samplePos) noexc
     {
         out.addEvent(juce::MidiMessage::noteOff(1, (int)arpPlayingNote), samplePos);
         arpNoteActive = false;
+        arpPlayingNote = 0;
     }
     for (uint8_t i = 0; i < arpPolyCount; ++i)
         out.addEvent(juce::MidiMessage::noteOff(1, (int)arpPolyHeld[(size_t)i]), samplePos);
     arpPolyCount = 0;
+    arpGateSamplesLeft = 0.0;
 }
 
 void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
                                 int samplePos,
                                 int stepIndex,
-                                float vel01,
                                 float gate01,
+                                double stepLenSamples,
                                 double gateScaleMul,
                                 double sampleRate,
                                 bool advanceSequencer) noexcept
 {
     juce::ignoreUnused(sampleRate);
+    const double stepCap = juce::jmax(1.0, stepLenSamples);
+    const auto gateSamples = [&](float g) noexcept -> double {
+        const double want = (double)juce::jlimit(0.1f, 2.f, g) * samplesPerArpStep * juce::jmax(1.0e-6, gateScaleMul);
+        return juce::jmin(want, stepCap);
+    };
     const int step = juce::jlimit(0, kArpSteps - 1, stepIndex);
     const ArpPattern pat = readArpPattern();
     if (arpPoolCount == 0)
@@ -539,7 +563,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     if (nNotes < 1)
         return;
 
-    const int vel = juce::jlimit(1, 127, (int)(vel01 * (float)readStepVel(step)));
+    const int vel = readStepVel(step);
     const float vNorm = (float)vel / 127.f;
     const int nOct = juce::jmax(1, readArpOctaves());
     const int octShift = (int)(((uint32_t)arpNoteWalk % (uint32_t)nOct) * 12u);
@@ -557,7 +581,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
             out.addEvent(juce::MidiMessage::noteOn(1, nn, vNorm), samplePos);
             arpPolyHeld[(size_t)arpPolyCount++] = (uint8_t)nn;
         }
-        arpGateSamplesLeft = (double)juce::jlimit(0.1f, 2.f, gate01) * samplesPerArpStep * juce::jmax(1.0e-6, gateScaleMul);
+        arpGateSamplesLeft = gateSamples(gate01);
         arpNoteActive = false;
         if (advanceSequencer)
         {
@@ -615,11 +639,15 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     nn += trn + octShift;
     nn = juce::jlimit(0, 127, nn);
 
-    allNotesOffOutput(out, samplePos);
+    if (!arpNoteActive || arpPlayingNote != (uint8_t)nn)
+    {
+        allNotesOffOutput(out, samplePos);
+        arpGateSamplesLeft = 0.0;
+    }
     out.addEvent(juce::MidiMessage::noteOn(1, nn, vNorm), samplePos);
     arpPlayingNote = (uint8_t)nn;
     arpNoteActive = true;
-    arpGateSamplesLeft = (double)juce::jlimit(0.1f, 2.f, gate01) * samplesPerArpStep * juce::jmax(1.0e-6, gateScaleMul);
+    arpGateSamplesLeft = gateSamples(gate01);
 
     if (advanceSequencer)
     {
@@ -633,9 +661,12 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                            int numSamples,
                            double sampleRate,
                            juce::AudioPlayHead* playHead,
-                           const TheoryEngine& theory) noexcept
+                           const TheoryEngine& theory,
+                           juce::AudioProcessorValueTreeState& apvts) noexcept
 {
-    if (!pointersBound || numSamples < 1)
+    if (!pointersBound)
+        bindPointers(apvts);
+    if (numSamples < 1)
         return;
 
     currentSampleRate = sampleRate;
@@ -670,7 +701,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
         if (const auto pos = playHead->getPosition())
             hostPlaying = pos->getIsPlaying();
 
-    const bool syncWants = readAP(ptrs.arpSyncPpq, 1.f) > 0.5f;
+    const bool syncWants = readAP(ptrs.arpSyncPpq, 0.f) > 0.5f;
     const bool syncActive = arpOn && syncWants && ppqValid;
     /** PPQ phase uses uniform beat subdivisions; odd-step swing lengthens steps and fights that — disable stretch when locked to transport. */
     const bool arpSwingAffectsStepLen = !(syncWants && ppqValid);
@@ -710,6 +741,9 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
             {
                 arpTimeInStep = ideal;
                 lastRatchetSubIdx = -1;
+                // Sync the pattern index to the grid as well
+                const double totalSteps = std::abs(ppqBlockStart) / stepBeats;
+                arpPatternIndex = (int)std::floor(std::fmod(totalSteps, (double)kArpSteps));
             }
             else if (hostPlaying && std::abs(err) > 1.0e-4)
             {
@@ -811,9 +845,23 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 {
                     const int tidx = readChordTypeIndex();
                     const ChordTypeData& cd = kChordTypes[juce::jmin(tidx, kNumChordTypesUi - 1)];
+                    int chordRootMidi = *locked;
+                    const int anch = readChordRootAnchor();
+                    if (anch > 0)
+                    {
+                        const int pc = juce::jlimit(0, 11, anch - 1);
+                        const int oct = chordRootMidi / 12;
+                        chordRootMidi = juce::jlimit(0, 127, oct * 12 + pc);
+                    }
+                    chordRootMidi = juce::jlimit(0, 127, chordRootMidi + 12 * readChordOctaveShift());
+
                     std::array<uint8_t, kMaxChordTones> notes {};
                     uint8_t nBuilt = 0;
-                    buildChordNotes(*locked, cd.iv, cd.n, readChordInversion(), notes, nBuilt);
+                    buildChordNotes(chordRootMidi, cd.iv, cd.n, readChordInversion(), notes, nBuilt);
+
+                    const int dens = readChordDensity();
+                    const int cap = juce::jmin((int)nBuilt, juce::jmax(1, 3 + dens));
+                    nBuilt = (uint8_t)cap;
 
                     std::array<uint8_t, kMaxChordTones> finalNotes {};
                     uint8_t nF = 0;
@@ -913,7 +961,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
             if (arpGateSamplesLeft > 0)
             {
                 arpGateSamplesLeft -= 1.0;
-                if (arpGateSamplesLeft <= 0)
+                if (arpGateSamplesLeft <= 2.0)
                     allNotesOffOutput(out, s);
             }
 
@@ -931,14 +979,15 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 if (readStepOn(si))
                 {
                     const int R = juce::jmax(1, readStepRkt(si));
-                    const double subLen = stepLen / (double)R;
-                    const float vel01 = (float)readStepVel(si) / 127.f;
+                    // At most one ratchet hit per audio sample — avoids multiple noteOns same sample (voice retrigger / hash).
+                    const int Rsafe = juce::jmin(R, juce::jmax(1, (int)std::floor(stepLen)));
+                    const double subLen = stepLen / (double)Rsafe;
                     const float gate01 = readStepDur(si);
-                    for (int k = 1; k <= R; ++k)
+                    for (int k = 1; k <= Rsafe; ++k)
                     {
                         const double b = (double)k * subLen;
                         if (prevT < b - 1e-9 && arpTimeInStep >= b - 1e-9)
-                            fireArpStep(out, s, si, vel01, gate01, 1.0 / (double)R, sampleRate, k == R);
+                            fireArpStep(out, s, si, gate01, stepLen, 1.0 / (double)Rsafe, sampleRate, k == Rsafe);
                     }
                 }
 

@@ -115,8 +115,9 @@ Legend: **PASS** = verified here · **CODE** = implementation present, not exerc
 | BUG_INT_002 | **Medium** | Editor **window size** persisted in state but **not restored** (`PluginEditor` fixed initial size) | **Open** |
 | BUG_INT_003 | **Low** | Top-bar `<` `>` cycles **all** DB presets, not “41 factory only” if user presets exist | **Open** (spec clarity vs implementation) |
 | BUG_HIST_01 | — | Prior log: AU/host crash around `getPlayHead()` — cited as fixed in earlier draft | **Unverified** in this pass |
+| BUG_INT_004 | **High** | `FxEngine` read layer/common/master **mix** and **EQ band dB** from raw APVTS atomics (normalized 0–1) instead of physical values — FX rack ineffective | **Fixed** 2026-04-10: `readFloatAP` + `AudioParameterFloat*` cache in `FxEngine.{h,cpp}`; rebuild `WolfsDen_ship` |
 
-*(No code changes were made as part of TASK_010 execution.)*
+*(Prior TASK_010 run: no code changes. Subsequent integration fix: BUG_INT_004.)*
 
 ---
 

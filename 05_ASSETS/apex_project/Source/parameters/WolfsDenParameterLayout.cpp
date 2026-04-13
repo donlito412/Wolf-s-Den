@@ -224,6 +224,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
     const juce::StringArray chordTypeChoices(
         { "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4", "Maj7", "Min7", "Dom7", "Min7b5", "Dim7",
           "MinMaj7", "Add9", "Maj9", "Min9" });
+    const juce::StringArray chordRootAnchorChoices(
+        { "Follow keys", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" });
     const juce::StringArray keysLockChoices(
         { "Off", "Remap", "Mute", "Chord Tones", "Chord Scales" });
     const juce::StringArray arpPatternChoices(
@@ -298,6 +300,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
 
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         pid("theory_voice_leading"), "Voice Leading", false));
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        pid("theory_chord_root_anchor"), "Chord Root", chordRootAnchorChoices, 0));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        pid("theory_chord_octave_shift"), "Chord Octave", -2, 2, 0));
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        pid("theory_chord_density"), "Chord Density", 0, 4, 0));
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         pid("midi_keys_lock_mode"), "Keys Lock Mode", keysLockChoices, 0));

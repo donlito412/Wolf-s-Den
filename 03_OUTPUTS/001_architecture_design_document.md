@@ -15,6 +15,7 @@
 7. Database Schema
 8. Full UI Page Map
 9. Build System Notes
+10. TASK_001 Closure — Deliverable Crosswalk & Scope
 
 ---
 
@@ -1179,6 +1180,26 @@ This is the target structure Cursor will scaffold in TASK_002:
 
 ---
 
+# 10. TASK_001 CLOSURE — DELIVERABLE CROSSWALK & SCOPE
+
+This section closes **TASK_001** against `/02_TASKS/TASK_001.md`: every required deliverable is present in this document at the section indicated. Subsequent tasks (002–010) implement or verify the design; **TASK_001 is complete when the blueprint exists**, not when every subsystem matches production fidelity.
+
+| TASK_001 deliverable | Location in this ADD |
+|---|---|
+| System block diagram (text-based) | §1 — Top-Level Architecture diagram; Signal Path Summary |
+| Full component list with responsibility of each | §2 — PluginProcessor through Preset System |
+| Thread model: UI vs DSP vs MIDI | §3 — Primary/secondary threads; Thread Communication Summary |
+| Data flow: MIDI in → Theory → Synth → FX → audio out | §4 — full pipeline; §1 signal path |
+| Parameter system: definition, typing, automation | §5 — APVTS, IDs, types, MIDI learn, smoothing |
+| State management: presets saved/recalled | §6 — serialization, preset workflow, Sound Lock |
+| Database schema: chord sets, scales, presets, tags | §7 — tables, indexes, relationships |
+| Full UI page map: every page, panel, key controls | §8 — Browse through Settings |
+| Build system notes: JUCE + CMake | §9 — requirements, CMake structure, folders, platforms, targets |
+
+**Scope boundary:** Conformance of the running plugin to this ADD (feature parity, deferred UI flows, host QA) is owned by **implementation tasks 002–009** and **verification in TASK_010**. TASK_001 does not re-open when implementation lags the design; gaps are tracked in those tasks’ reports and closed there in order.
+
+---
+
 # DECISIONS LOG
 
 All architectural decisions are justified against the reference plugin research in `/01_BRIEF/vst_research.md`.
@@ -1196,4 +1217,4 @@ All architectural decisions are justified against the reference plugin research 
 
 ---
 
-*Document Version: 1.0 | Generated: 2026-04-09 | Agent: Claude | Task: TASK_001*
+*Document Version: 1.1 | Updated: 2026-04-12 | §10 closure crosswalk added | Task: TASK_001*
