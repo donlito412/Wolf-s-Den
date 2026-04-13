@@ -15,26 +15,30 @@
 
 ## FX units (`FxUnitType`, 23 algorithms + Off)
 
-All names appear in APVTS choice lists. Implementations are **stereo**, **mix** applied per slot (insert / wet-dry), using `juce::dsp` where noted:
+All names appear in APVTS choice lists. Implementations are **stereo**, using `juce::dsp` where noted. 
 
-| Type | Implementation notes |
-|------|---------------------|
-| Compressor | Envelope follower, ~3 ms attack / 80 ms release, ratio ~4:1 |
-| Limiter | Soft clip + ceiling |
-| Gate | Threshold + smoothed open/close |
-| Parametric EQ (4-band) | **RBJ IIR:** low shelf 100 Hz, peaking 280 Hz / 2.4 kHz, high shelf 8 kHz; gains **`fx_sNN_eq0`…`eq3`** (−18…+18 dB) per slot index 0–23 |
-| HPF / LPF | StateVariableTPT 12 dB/oct |
-| Soft / Hard clip | tanh / clamp |
-| Bit crusher | Quantize + optional sample hold |
-| Waveshaper | tanh “tape-ish” curve |
-| Chorus / Vibrato | Modulated DelayLine |
-| Flanger | Short mod delay + feedback |
-| Phaser | 3-stage all-pass style |
-| Tremolo / Auto-Pan | LFO gain / stereo pan law |
-| Delay / Ping-pong | DelayLine + feedback, cross-feedback for ping-pong |
-| Reverb (three menu entries) | `juce::dsp::Reverb` (quality FreeVerb-style algorithm) + **stereo predelay** (ms tuned per menu: hall / bright / spring-style). **UI names** state “algorithmic” / “plate-style” / “spring-style” — not physical plate or spring modeling. |
-| Width | Mid/side width scaling |
-| Mono blend | Full-band L+R blend toward mono (honest menu label) |
+**Update (2026-04-13):** All FX units now support four generic modulatable parameters (**`fx_sNN_p0`…`p3`**) in addition to the Mix control.
+
+| Type | Param 0 (p0) | Param 1 (p1) | Param 2 (p2) | Param 3 (p3) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Compressor** | Attack | Release | Threshold | Ratio |
+| **Limiter** | Ceiling | Drive | - | - |
+| **Gate** | Threshold | Attack | Release | - |
+| **HPF / LPF** | Frequency | Resonance | - | - |
+| **Soft / Hard Clip**| Drive | Ceiling (Hard) | - | - |
+| **Bit Crusher** | Bits | Sample Hold | - | - |
+| **Waveshaper** | Drive | - | - | - |
+| **Chorus / Vibrato**| Rate | Depth | - | - |
+| **Flanger** | Rate | Depth | Feedback | - |
+| **Phaser** | Rate | Center Freq | - | - |
+| **Tremolo** | Rate | Depth | - | - |
+| **Auto-Pan** | Rate | Depth | - | - |
+| **Delay (Both)** | Time | Feedback | - | - |
+| **Reverb (All)** | Room Size | Damping | Pre-delay | - |
+| **Stereo Width** | Width | - | - | - |
+| **Mono Blend** | Frequency | Side Mix | - | - |
+
+**Parametric EQ (4-band):** Uses dedicated band gain parameters **`fx_sNN_eq0`…`eq3`** (-18…+18 dB).
 
 **Per-slot DSP state:** 24 `SlotDSP` objects (16 layer + 4 common + 4 master), each with reverb, dual delay lines, filters, and modulation state as needed.
 

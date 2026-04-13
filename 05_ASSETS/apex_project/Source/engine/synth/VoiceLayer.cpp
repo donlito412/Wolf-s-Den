@@ -9,7 +9,6 @@ namespace wolfsden
 {
 namespace
 {
-/** APVTS getRawParameterValue() is denormalised (JUCE 8). Choice index is usually a whole float in range. */
 inline int readChoiceIndex(std::atomic<float>* ap, int numItems, int defIdx) noexcept
 {
     if (!ap || numItems < 2)
@@ -20,7 +19,6 @@ inline int readChoiceIndex(std::atomic<float>* ap, int numItems, int defIdx) noe
     return juce::jlimit(0, numItems - 1, (int)std::lround(v));
 }
 
-/** Int params: denormalised value is physical integer as float; 0..1 treated as legacy normalised span. */
 inline int readIntFromNorm(std::atomic<float>* ap, int minV, int maxV, int defV) noexcept
 {
     if (!ap || maxV < minV)
@@ -31,7 +29,6 @@ inline int readIntFromNorm(std::atomic<float>* ap, int minV, int maxV, int defV)
     return juce::jlimit(minV, maxV, (int)std::lround(v));
 }
 
-/** Float params: atomic already holds physical value (APVTS raw denormalised). */
 inline float readFloatAP(std::atomic<float>* ap, juce::AudioParameterFloat* pf, float defV) noexcept
 {
     if (!ap)
@@ -44,7 +41,29 @@ inline float readFloatAP(std::atomic<float>* ap, juce::AudioParameterFloat* pf, 
     }
     return v;
 }
+
+inline uint32_t rngU32(int salt) noexcept
+{
+    uint32_t x = (uint32_t)(salt * 1103515245 + 12345);
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+}
 } // namespace
+
+bool VoiceLayer::readBoolNorm(std::atomic<float>* ap, bool defV) noexcept
+{
+    if (!ap)
+        return defV;
+    return ap->load(std::memory_order_relaxed) > 0.5f;
+}
+
+double VoiceLayer::beatsForSyncDivIndex(int divIdx) noexcept
+{
+    static constexpr double b[] = { 0.125, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0 };
+    return b[juce::jlimit(0, 8, divIdx)];
+}
 
 void VoiceLayer::setBiquadIdentity(dsp::Biquad& b) noexcept
 {
@@ -53,15 +72,19 @@ void VoiceLayer::setBiquadIdentity(dsp::Biquad& b) noexcept
 }
 
 void VoiceLayer::prepare(double sampleRate,
-                         const double* wavetable,
-                         int wavetableSize,
+                         const double* wavetableA,
+                         int wavetableSizeA,
+                         const double* wavetableB,
+                         int wavetableSizeB,
                          const double* granularSource,
                          int granularSize,
                          int maxBlockSize) noexcept
 {
     sr = sampleRate;
-    wtData = wavetable;
-    wtLen = juce::jmax(8, wavetableSize);
+    wtData = wavetableA;
+    wtBData = wavetableB != nullptr ? wavetableB : wavetableA;
+    wtLen = juce::jmax(8, wavetableSizeA);
+    juce::ignoreUnused(wavetableSizeB);
     granSource = granularSource;
     granLen = juce::jmax(8, granularSize);
     ampAdsr.setSampleRate(sr);
@@ -77,10 +100,12 @@ void VoiceLayer::reset() noexcept
 {
     phaseSin = phaseSaw = phaseSq = triIntegrator = 0;
     phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
-    combBuf.fill(0.0);
-    combWritePos = 0;
-    combDelaySamples = 0;
-    combFeedback = 0.0;
+    noiseOscState = 0x12345678u;
+    combBuf1.fill(0.0);
+    combBuf2.fill(0.0);
+    combWritePos1 = combWritePos2 = 0;
+    combDelaySamples1 = combDelaySamples2 = 0;
+    combFeedback1 = combFeedback2 = 0.0;
     uniSin.fill(0.0);
     uniSaw.fill(0.0);
     uniSq.fill(0.0);
@@ -88,18 +113,42 @@ void VoiceLayer::reset() noexcept
     for (auto& g : grains)
         g.active = false;
     grainSpawnCounter = 0;
+    granPlayhead = 0;
+    frozenPlayhead = 0;
+    hadFreezeOn = false;
     ampAdsr.reset();
     filtAdsr.reset();
     f1.reset();
+    f1s.reset();
     f2.reset();
+    f2s.reset();
     cachedAmpA = cachedAmpD = cachedAmpS = cachedAmpR = -1.f;
     cachedFilA = cachedFilD = cachedFilS = cachedFilR = -1.f;
     smoothedVol = -1.0;
     smoothedPan = 0.0;
-    smoothedCut = -1.0;
+    smoothedCut1 = smoothedCut2 = -1.0;
+    lfo2DelayRem = 0;
+    lfo2FadeTotal = lfo2FadeProg = 0;
+    glideHz = glideTargetHz = 440.0;
 }
 
-void VoiceLayer::noteOn(int midiNote, float velocity) noexcept
+static double computeTargetHz(int midiNote,
+                              int layerIndex,
+                              const ParamPointers& p,
+                              float modMatrixPitchSemi) noexcept
+{
+    const double masterPitchSemi = (double)readFloatAP(p.masterPitch, p.masterPitchF, 0.f);
+    const int coarse = readIntFromNorm(p.layerCoarse[layerIndex], -24, 24, 0);
+    const int octave = readIntFromNorm(p.layerOctave[layerIndex], -3, 3, 0);
+    const double fineCents = (double)readFloatAP(p.layerFine[layerIndex], p.layerFineF[layerIndex], 0.f);
+    double hz = dsp::midiNoteToHz(midiNote + coarse + octave * 12 + (int)std::lround(masterPitchSemi));
+    hz *= std::pow(2.0, fineCents / 1200.0);
+    if (modMatrixPitchSemi != 0.f)
+        hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);
+    return hz;
+}
+
+void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept
 {
     currentNote = midiNote;
     currentVel = velocity;
@@ -111,14 +160,79 @@ void VoiceLayer::noteOn(int midiNote, float velocity) noexcept
     uniTri.fill(0.0);
     ampAdsr.noteOn();
     filtAdsr.noteOn();
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
+    glideHz = glideTargetHz;
 
-    // Sample: promote pending→cached before testing (otherwise startNote never runs → silence forever)
     samplePlayer.syncPendingToCache();
     if (samplePlayer.hasReadableSource())
     {
         const float pitchRatio = std::pow(2.f, (float)(midiNote - samplePlayer.rootNote()) / 12.f);
         samplePlayer.startNote(pitchRatio, velocity);
     }
+
+    const float l2d = readFloatAP(p.layerLfo2Delay[layerIndex], p.layerLfo2DelayF[layerIndex], 0.f);
+    const float l2f = readFloatAP(p.layerLfo2Fade[layerIndex], p.layerLfo2FadeF[layerIndex], 0.f);
+    lfo2DelayRem = (double)l2d * sr;
+    lfo2FadeTotal = (double)l2f * sr;
+    lfo2FadeProg = 0;
+    if (readBoolNorm(p.layerLfo2Retrigger[layerIndex], false))
+        lfoLayer2.phase = 0;
+}
+
+void VoiceLayer::noteOnLegato(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept
+{
+    currentNote = midiNote;
+    currentVel = velocity;
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
+    samplePlayer.syncPendingToCache();
+    if (samplePlayer.hasReadableSource())
+    {
+        const float pitchRatio = std::pow(2.f, (float)(midiNote - samplePlayer.rootNote()) / 12.f);
+        samplePlayer.startNote(pitchRatio, velocity);
+    }
+    if (readBoolNorm(p.layerLfo2Retrigger[layerIndex], false))
+    {
+        lfoLayer2.phase = 0;
+        const float l2d = readFloatAP(p.layerLfo2Delay[layerIndex], p.layerLfo2DelayF[layerIndex], 0.f);
+        const float l2f = readFloatAP(p.layerLfo2Fade[layerIndex], p.layerLfo2FadeF[layerIndex], 0.f);
+        lfo2DelayRem = (double)l2d * sr;
+        lfo2FadeTotal = (double)l2f * sr;
+        lfo2FadeProg = 0;
+    }
+}
+
+void VoiceLayer::noteOnSteal(int midiNote,
+                             float velocity,
+                             int layerIndex,
+                             const ParamPointers& p,
+                             double ampEnvLevel,
+                             double filtEnvLevel) noexcept
+{
+    currentNote = midiNote;
+    currentVel = velocity;
+    phaseSin = phaseSaw = phaseSq = phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
+    triIntegrator = 0;
+    uniSin.fill(0.0);
+    uniSaw.fill(0.0);
+    uniSq.fill(0.0);
+    uniTri.fill(0.0);
+    ampAdsr.noteOnFromLevel(ampEnvLevel * 0.92);
+    filtAdsr.noteOnFromLevel(filtEnvLevel * 0.92);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
+    glideHz = glideTargetHz;
+    samplePlayer.syncPendingToCache();
+    if (samplePlayer.hasReadableSource())
+    {
+        const float pitchRatio = std::pow(2.f, (float)(midiNote - samplePlayer.rootNote()) / 12.f);
+        samplePlayer.startNote(pitchRatio, velocity);
+    }
+    const float l2d = readFloatAP(p.layerLfo2Delay[layerIndex], p.layerLfo2DelayF[layerIndex], 0.f);
+    const float l2f = readFloatAP(p.layerLfo2Fade[layerIndex], p.layerLfo2FadeF[layerIndex], 0.f);
+    lfo2DelayRem = (double)l2d * sr;
+    lfo2FadeTotal = (double)l2f * sr;
+    lfo2FadeProg = 0;
+    if (readBoolNorm(p.layerLfo2Retrigger[layerIndex], false))
+        lfoLayer2.phase = 0;
 }
 
 void VoiceLayer::noteOff() noexcept
@@ -135,7 +249,8 @@ void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexc
     const float aS = readFloatAP(p.layerAS[layerIndex], p.layerASF[layerIndex], 0.8f);
     const float aR = readFloatAP(p.layerAR[layerIndex], p.layerARF[layerIndex], 0.2f);
     const float ampEpsilon = 1e-6f;
-    if (std::fabs(aA - cachedAmpA) > ampEpsilon || std::fabs(aD - cachedAmpD) > ampEpsilon || std::fabs(aS - cachedAmpS) > ampEpsilon || std::fabs(aR - cachedAmpR) > ampEpsilon)
+    if (std::fabs(aA - cachedAmpA) > ampEpsilon || std::fabs(aD - cachedAmpD) > ampEpsilon
+        || std::fabs(aS - cachedAmpS) > ampEpsilon || std::fabs(aR - cachedAmpR) > ampEpsilon)
     {
         ampAdsr.setParameters(aA, aD, aS, aR);
         cachedAmpA = aA;
@@ -149,7 +264,8 @@ void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexc
     const float fS = readFloatAP(p.filterAdsrS, p.filterAdsrSF, 0.7f);
     const float fR = readFloatAP(p.filterAdsrR, p.filterAdsrRF, 0.15f);
     const float filtEpsilon = 1e-6f;
-    if (std::fabs(fA - cachedFilA) > filtEpsilon || std::fabs(fD - cachedFilD) > filtEpsilon || std::fabs(fS - cachedFilS) > filtEpsilon || std::fabs(fR - cachedFilR) > filtEpsilon)
+    if (std::fabs(fA - cachedFilA) > filtEpsilon || std::fabs(fD - cachedFilD) > filtEpsilon
+        || std::fabs(fS - cachedFilS) > filtEpsilon || std::fabs(fR - cachedFilR) > filtEpsilon)
     {
         filtAdsr.setParameters(fA, fD, fS, fR);
         cachedFilA = fA;
@@ -159,70 +275,25 @@ void VoiceLayer::updateAdsrTargets(int layerIndex, const ParamPointers& p) noexc
     }
 }
 
-double VoiceLayer::readWavetable(double ph) const noexcept
+double VoiceLayer::readWavetableMorph(double ph, float morph01) const noexcept
 {
     if (wtData == nullptr || wtLen < 2)
         return 0.0;
-    while (ph >= 1.0)
-        ph -= 1.0;
-    while (ph < 0.0)
-        ph += 1.0;
-    const double x = ph * (double)(wtLen - 1);
-    const int i0 = (int)x;
-    const int i1 = juce::jmin(i0 + 1, wtLen - 1);
-    const double f = x - (double)i0;
-    return wtData[i0] * (1.0 - f) + wtData[i1] * f;
-}
-
-void VoiceLayer::spawnGrain() noexcept
-{
-    for (auto& g : grains)
-    {
-        if (!g.active)
-        {
-            g.active = true;
-            g.pos = (double)(grainSpawnCounter % 9973) / 9973.0 * (double)juce::jmax(1, granLen - 1);
-            const double lenMs = 35.0 + (double)(grainSpawnCounter % 80);
-            const double lenSamp = juce::jlimit(32.0, (double)granLen * 0.5, lenMs * 0.001 * sr);
-            g.winInc = 1.0 / lenSamp;
-            g.winPos = 0;
-            g.speed = 1.0 + 0.02 * std::sin((double)grainSpawnCounter * 0.1);
-            g.amp = 0.35;
-            return;
-        }
-    }
-}
-
-double VoiceLayer::processGranular(double hz) noexcept
-{
-    juce::ignoreUnused(hz);
-    grainSpawnCounter++;
-    const int interval = juce::jmax(1, (int)(sr / 42.0));
-    if ((grainSpawnCounter % interval) == 0)
-        spawnGrain();
-
-    double sum = 0;
-    for (auto& g : grains)
-    {
-        if (!g.active)
-            continue;
-        const double base = std::floor(g.pos);
-        const int i0 = ((int)base) % granLen;
-        const int i1 = (i0 + 1) % granLen;
-        const double frac = g.pos - base;
-        const double s = granSource[i0] * (1.0 - frac) + granSource[i1] * frac;
-        const double w = 0.5 - 0.5 * std::cos(dsp::twoPi * std::min(1.0, g.winPos));
-        sum += s * w * g.amp;
-        g.pos += g.speed * (double)granLen / (sr * 0.35);
-        while (g.pos >= granLen)
-            g.pos -= granLen;
-        while (g.pos < 0)
-            g.pos += granLen;
-        g.winPos += g.winInc;
-        if (g.winPos >= 1.0)
-            g.active = false;
-    }
-    return sum;
+    auto rd = [](const double* d, int len, double phase) noexcept {
+        while (phase >= 1.0)
+            phase -= 1.0;
+        while (phase < 0.0)
+            phase += 1.0;
+        const double x = phase * (double)(len - 1);
+        const int i0 = (int)x;
+        const int i1 = juce::jmin(i0 + 1, len - 1);
+        const double f = x - (double)i0;
+        return d[i0] * (1.0 - f) + d[i1] * f;
+    };
+    const double va = rd(wtData, wtLen, ph);
+    const double vb = rd(wtBData != nullptr ? wtBData : wtData, wtLen, ph);
+    const double t = juce::jlimit(0.0, 1.0, (double)morph01);
+    return va * (1.0 - t) + vb * t;
 }
 
 double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept
@@ -243,11 +314,11 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
 
     const double inc = hz / sr;
     const double fmIndex = (double)readFloatAP(p.layerRes[layerIdx], p.layerResF[layerIdx], 1.f) * 0.35;
+    const float morphN = readFloatAP(p.layerWtMorph[layerIdx], p.layerWtMorphF[layerIdx], 0.f);
 
     switch (oscType)
     {
-        case 0: // sine
-        {
+        case 0: {
             if (nv <= 1)
             {
                 phaseSin += inc;
@@ -268,8 +339,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             }
             return acc / (double)nv;
         }
-        case 1: // saw
-        {
+        case 1: {
             if (nv <= 1)
             {
                 phaseSaw += inc;
@@ -290,8 +360,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             }
             return acc / (double)nv;
         }
-        case 2: // square
-        {
+        case 2: {
             if (nv <= 1)
             {
                 phaseSq += inc;
@@ -312,8 +381,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             }
             return acc / (double)nv;
         }
-        case 3: // triangle
-        {
+        case 3: {
             if (nv <= 1)
             {
                 phaseSq += inc;
@@ -334,17 +402,15 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             }
             return acc / (double)nv;
         }
-        case 4: // wavetable
-        {
+        case 4: {
             phaseWt += inc;
             if (phaseWt >= 1.0)
                 phaseWt -= 1.0;
-            return readWavetable(phaseWt);
+            return readWavetableMorph(phaseWt, morphN);
         }
-        case 5: // granular
-            return processGranular(hz);
-        case 6: // FM
-        {
+        case 5:
+            return processGranular(hz, layerIdx, p, samplePlayer.hasReadableSource());
+        case 6: {
             phaseFmMod += inc * 2.0;
             if (phaseFmMod >= 1.0)
                 phaseFmMod -= 1.0;
@@ -354,83 +420,231 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             const double mod = fmIndex * std::sin(dsp::twoPi * phaseFmMod);
             return std::sin(dsp::twoPi * phaseFmCar + mod);
         }
-        case 7: // sample — real WAV playback via WDSamplePlayer
-        {
+        case 7: {
             if (samplePlayer.hasReadableSource() && samplePlayer.isActive())
-                return (double) samplePlayer.nextSampleMono();
+                return (double)samplePlayer.nextSampleMono();
             return 0.0;
         }
+        case 8:
+            return (double)dsp::xorshift32(noiseOscState) * 0.35;
         default:
             return 0.0;
     }
 }
 
-void VoiceLayer::updateFilterCoeffs(int filterType, double cutoffHz, double resonance, double modSemitones) noexcept
+void VoiceLayer::configureFilterBank(dsp::Biquad& f,
+                                     dsp::Biquad& fs,
+                                     int filterType,
+                                     double cutoffHz,
+                                     double resonance,
+                                     double modSemitones,
+                                     int& combDelay,
+                                     double& combFb,
+                                     int& combWritePos,
+                                     std::array<double, 2048>& combBuf) noexcept
 {
-    combDelaySamples = 0;
+    juce::ignoreUnused(combBuf);
+    juce::ignoreUnused(combWritePos);
+    combDelay = 0;
     double fc = cutoffHz * std::pow(2.0, modSemitones / 12.0);
     fc = juce::jlimit(40.0, sr * 0.45, fc);
     const double Q = juce::jlimit(0.5, 18.0, resonance * 0.12 + 0.55);
 
-    auto bypassF2 = [&] {
-        f2.b0 = 1;
-        f2.b1 = f2.b2 = f2.a1 = f2.a2 = 0;
-        f2.z1 = f2.z2 = 0;
+    auto bypass = [&](dsp::Biquad& b) {
+        setBiquadIdentity(b);
+        b.z1 = b.z2 = 0;
     };
 
     switch (filterType)
     {
-        case 0: // LP24
-            f1.setLowPass(sr, fc, Q);
-            f2.setLowPass(sr, fc, Q * 0.92);
+        case 0:
+            f.setLowPass(sr, fc, Q);
+            fs.setLowPass(sr, fc, Q * 0.92);
             break;
-        case 1: // LP12
-            f1.setLowPass(sr, fc, Q);
-            bypassF2();
+        case 1:
+            f.setLowPass(sr, fc, Q);
+            bypass(fs);
             break;
-        case 2: // BP
-            f1.setBandPass(sr, fc, Q);
-            bypassF2();
+        case 2:
+            f.setBandPass(sr, fc, Q);
+            bypass(fs);
             break;
-        case 3: // HP12
-            f1.setHighPass(sr, fc, Q);
-            bypassF2();
+        case 3:
+            f.setHighPass(sr, fc, Q);
+            bypass(fs);
             break;
-        case 4: // Notch
-            f1.setNotch(sr, fc, Q);
-            bypassF2();
+        case 4:
+            f.setNotch(sr, fc, Q);
+            bypass(fs);
             break;
-        case 5: // HP24
-            f1.setHighPass(sr, fc, Q);
-            f2.setHighPass(sr, fc, Q * 0.92);
+        case 5:
+            f.setHighPass(sr, fc, Q);
+            fs.setHighPass(sr, fc, Q * 0.92);
             break;
-        case 6: // Comb (delay + feedback; coeffs unused)
-        {
-            combDelaySamples = (int)(sr / juce::jmax(50.0, fc));
-            combDelaySamples = juce::jlimit(2, 1024, combDelaySamples);
-            combFeedback = juce::jlimit(0.0, 0.92, (resonance / 42.0) * 0.9);
-            setBiquadIdentity(f1);
-            setBiquadIdentity(f2);
-            f1.z1 = f1.z2 = f2.z1 = f2.z2 = 0;
+        case 6:
+            combDelay = (int)(sr / juce::jmax(50.0, fc));
+            combDelay = juce::jlimit(2, 1024, combDelay);
+            combFb = juce::jlimit(0.0, 0.92, (resonance / 42.0) * 0.9);
+            setBiquadIdentity(f);
+            setBiquadIdentity(fs);
+            f.z1 = f.z2 = fs.z1 = fs.z2 = 0;
             break;
-        }
-        case 7: // Formant (dual band-pass vowel morph)
-        {
+        case 7: {
             const double vowel = juce::jlimit(0.0, 1.0, (fc - 150.0) / 8000.0);
             const double f1f = 320.0 + vowel * 720.0;
             const double f2f = 900.0 + vowel * 2200.0;
             const double q = juce::jlimit(2.0, 14.0, 3.0 + resonance * 0.22);
-            f1.setBandPass(sr, f1f, q);
-            f2.setBandPass(sr, f2f, q * 0.92);
-            combDelaySamples = 0;
+            f.setBandPass(sr, f1f, q);
+            fs.setBandPass(sr, f2f, q * 0.92);
             break;
         }
         default:
-            combDelaySamples = 0;
-            f1.setLowPass(sr, fc, Q);
-            bypassF2();
+            bypass(f);
+            bypass(fs);
             break;
     }
+}
+
+void VoiceLayer::spawnGrain(int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept
+{
+    const float posN = readFloatAP(p.layerGranPos[layerIdx], p.layerGranPosF[layerIdx], 0.5f);
+    const float sizeN = readFloatAP(p.layerGranSize[layerIdx], p.layerGranSizeF[layerIdx], 0.1f);
+    const float scatN = readFloatAP(p.layerGranScatter[layerIdx], p.layerGranScatterF[layerIdx], 0.f);
+    const bool freeze = readBoolNorm(p.layerGranFreeze[layerIdx], false);
+
+    const int span = useSampleSource ? samplePlayer.getLoopFrameCount() : granLen;
+    const double basePos = freeze ? frozenPlayhead
+                                   : (double)posN * (double)juce::jmax(1, span - 1);
+    const uint32_t r = rngU32(grainSpawnCounter + layerIdx * 7919);
+    const double jit = ((double)(r & 0xffff) / 32768.0 - 1.0) * scatN * 0.08 * (double)span;
+    double gpos = basePos + jit;
+    while (gpos < 0)
+        gpos += span;
+    while (gpos >= span)
+        gpos -= span;
+
+    const double lenMs = 1.0 + (double)sizeN * (double)sizeN * 499.0;
+    const double lenSamp = juce::jlimit(sr * 0.001, sr * 0.5, lenMs * 0.001 * sr);
+
+    for (auto& g : grains)
+    {
+        if (!g.active)
+        {
+            g.active = true;
+            g.pos = gpos;
+            g.winInc = 1.0 / lenSamp;
+            g.winPos = 0;
+            g.speed = std::pow(2.0, (((int)(r >> 8) % 513) / 512.0 - 0.5) * scatN * 0.04);
+            g.amp = 0.4;
+            g.pan = (((int)(r >> 16) % 513) / 512.0 - 0.5) * scatN;
+            return;
+        }
+    }
+}
+
+double VoiceLayer::processGranular(double hz, int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept
+{
+    juce::ignoreUnused(hz);
+    const float densN = readFloatAP(p.layerGranDensity[layerIdx], p.layerGranDensityF[layerIdx], 0.5f);
+    const bool freeze = readBoolNorm(p.layerGranFreeze[layerIdx], false);
+    if (freeze)
+    {
+        if (!hadFreezeOn)
+        {
+            const int span = useSampleSource ? samplePlayer.getLoopFrameCount() : granLen;
+            frozenPlayhead = (double)readFloatAP(p.layerGranPos[layerIdx], p.layerGranPosF[layerIdx], 0.5f)
+                             * (double)juce::jmax(1, span - 1);
+        }
+        hadFreezeOn = true;
+    }
+    else
+    {
+        hadFreezeOn = false;
+    }
+
+    grainSpawnCounter++;
+    const int baseIv = juce::jmax(1, (int)(sr / (4.0 + (double)densN * 80.0)));
+    if ((grainSpawnCounter % baseIv) == 0)
+        spawnGrain(layerIdx, p, useSampleSource);
+
+    double sumL = 0, sumR = 0;
+    for (auto& g : grains)
+    {
+        if (!g.active)
+            continue;
+        float sMono = 0.f;
+        if (useSampleSource)
+        {
+            if (!samplePlayer.readMonoAt(g.pos, sMono))
+            {
+                g.active = false;
+                continue;
+            }
+        }
+        else
+        {
+            const int i0 = ((int)std::floor(g.pos)) % granLen;
+            const int i1 = (i0 + 1) % granLen;
+            const double frac = g.pos - std::floor(g.pos);
+            sMono = (float)(granSource[i0] * (1.0 - frac) + granSource[i1] * frac);
+        }
+        const double w = 0.5 - 0.5 * std::cos(dsp::twoPi * std::min(1.0, g.winPos));
+        const double sig = (double)sMono * w * g.amp;
+        const double ang = (g.pan + 1.0) * dsp::twoPi * 0.25;
+        sumL += sig * std::cos(ang);
+        sumR += sig * std::sin(ang);
+        g.pos += g.speed;
+        const int sp = useSampleSource ? samplePlayer.getLoopFrameCount() : granLen;
+        while (g.pos >= sp)
+            g.pos -= sp;
+        while (g.pos < 0)
+            g.pos += sp;
+        g.winPos += g.winInc;
+        if (g.winPos >= 1.0)
+            g.active = false;
+    }
+    return (sumL + sumR) * 0.5;
+}
+
+static double applyDrive(double x, double drive01) noexcept
+{
+    const double g = 1.0 + drive01 * 8.0;
+    return std::tanh(x * g) / std::tanh(juce::jmax(0.01, g));
+}
+
+static double processComb(double osc,
+                          int d,
+                          double fb,
+                          int& wp,
+                          std::array<double, 2048>& buf) noexcept
+{
+    if (d <= 0)
+        return osc;
+    const int w = wp;
+    const int rp = (w - d + 2048) % 2048;
+    const double delayed = buf[(size_t)rp];
+    const double y = osc + fb * delayed;
+    buf[(size_t)w] = y;
+    wp = (w + 1) % 2048;
+    return y;
+}
+
+static double processFilterPair(dsp::Biquad& f,
+                              dsp::Biquad& fs,
+                              int t,
+                              double x,
+                              int& combD,
+                              double& combFb,
+                              int& combWp,
+                              std::array<double, 2048>& combBuf) noexcept
+{
+    if (t == 6 && combD > 0)
+        return processComb(x, combD, combFb, combWp, combBuf);
+    if (t == 7)
+        return fs.process(f.process(x));
+    if (t == 0 || t == 5)
+        return fs.process(f.process(x));
+    return f.process(x);
 }
 
 void VoiceLayer::renderAdd(double& outL,
@@ -439,6 +653,7 @@ void VoiceLayer::renderAdd(double& outL,
                            int midiNote,
                            float velocity,
                            double globalLfoValue,
+                           double hostBpm,
                            const ParamPointers& p,
                            float modMatrixCutSemi,
                            float modMatrixResAdd,
@@ -451,82 +666,116 @@ void VoiceLayer::renderAdd(double& outL,
 
     updateAdsrTargets(layerIndex, p);
 
-    // Master pitch (global) + per-layer coarse + mod matrix pitch (vibrato)
-    const double masterPitchSemi = (double)readFloatAP(p.masterPitch, p.masterPitchF, 0.f);
-    const int coarse = readIntFromNorm(p.layerCoarse[layerIndex], -24, 24, 0);
-    const double fineCents = (double)readFloatAP(p.layerFine[layerIndex], p.layerFineF[layerIndex], 0.f);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, modMatrixPitchSemi);
+    const float portSec = p.synthPortamento != nullptr
+                              ? readFloatAP(p.synthPortamento, nullptr, 0.f)
+                              : 0.f;
+    if (portSec <= 1e-5f)
+        glideHz = glideTargetHz;
+    else
+    {
+        const double a = 1.0 - std::exp(-1.0 / (juce::jmax(0.001, (double)portSec) * sr));
+        glideHz += (glideTargetHz - glideHz) * a;
+    }
 
-    // Combine integer semitone offsets; fractional mod pitch handled via pow(2, semis/12)
-    double hz = dsp::midiNoteToHz(midiNote + coarse + (int)std::lround(masterPitchSemi));
-    hz *= std::pow(2.0, fineCents / 1200.0);
-    // Apply mod matrix pitch modulation (vibrato) as a fractional semitone multiplier
-    if (modMatrixPitchSemi != 0.f)
-        hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);
-
-    const int oscType = readChoiceIndex(p.layerOsc[layerIndex], 8, 0);
-    const double osc = processOscillator(oscType, hz, layerIndex, p);
+    const int oscType = readChoiceIndex(p.layerOsc[layerIndex], 9, 0);
+    const double osc = processOscillator(oscType, glideHz, layerIndex, p);
 
     const double ampEnv = ampAdsr.process();
     const double filtEnv = filtAdsr.process();
 
-    const int lfoSh = readChoiceIndex(p.lfoShape, 6, 0);
-    lfoLayer.setShape(juce::jlimit(0, 5, lfoSh));
+    const int lfoSh = readChoiceIndex(p.lfoShape, 8, 0);
+    lfoLayer.setShape(juce::jlimit(0, 7, lfoSh));
     const float lfoDep = readFloatAP(p.lfoDepth, p.lfoDepthF, 0.f);
     const double layerLfo = lfoLayer.tick(0.23 + 0.11 * (double)layerIndex);
 
-    const int lfo2Sh = readChoiceIndex(p.layerLfo2Shape[layerIndex], 6, 0);
-    lfoLayer2.setShape(juce::jlimit(0, 5, lfo2Sh));
+    const int lfo2Sh = readChoiceIndex(p.layerLfo2Shape[layerIndex], 8, 0);
+    lfoLayer2.setShape(juce::jlimit(0, 7, lfo2Sh));
     const float lfo2DepN = readFloatAP(p.layerLfo2Depth[layerIndex], p.layerLfo2DepthF[layerIndex], 0.f);
-    const double lfo2Hz = (double)readFloatAP(p.layerLfo2Rate[layerIndex], p.layerLfo2RateF[layerIndex], 2.f);
-    const double layerLfo2 = lfoLayer2.tick(lfo2Hz);
+    const bool l2sync = readBoolNorm(p.layerLfo2Sync[layerIndex], false);
+    double lfo2Hz = (double)readFloatAP(p.layerLfo2Rate[layerIndex], p.layerLfo2RateF[layerIndex], 2.f);
+    if (l2sync && hostBpm > 20.0)
+    {
+        const int divi = readChoiceIndex(p.layerLfo2SyncDiv[layerIndex], 9, 4);
+        const double beats = beatsForSyncDivIndex(divi);
+        lfo2Hz = hostBpm / (60.0 * beats);
+    }
 
-    const double baseCut = (double)readFloatAP(p.layerCutoff[layerIndex], p.layerCutoffF[layerIndex], 5000.f);
-    if (smoothedCut < 0) smoothedCut = baseCut;
-    smoothedCut += (baseCut - smoothedCut) * 0.005;
+    double l2v = 0;
+    if (lfo2DelayRem > 0)
+    {
+        lfo2DelayRem -= 1.0;
+        l2v = 0;
+    }
+    else
+    {
+        l2v = lfoLayer2.tick(lfo2Hz);
+        if (lfo2FadeTotal > 0 && lfo2FadeProg < lfo2FadeTotal)
+        {
+            l2v *= lfo2FadeProg / juce::jmax(1.0, lfo2FadeTotal);
+            lfo2FadeProg += 1.0;
+            if (lfo2FadeProg >= lfo2FadeTotal)
+                lfo2FadeTotal = 0;
+        }
+    }
 
-    const double resCtrl = (double)readFloatAP(p.layerRes[layerIndex], p.layerResF[layerIndex], 1.f)
-                           + (double)modMatrixResAdd;
+    const double baseCut1 = (double)readFloatAP(p.layerCutoff[layerIndex], p.layerCutoffF[layerIndex], 5000.f);
+    const double baseCut2 = (double)readFloatAP(p.layerF2cutoff[layerIndex], p.layerF2cutoffF[layerIndex], 20000.f);
+    if (smoothedCut1 < 0)
+        smoothedCut1 = baseCut1;
+    if (smoothedCut2 < 0)
+        smoothedCut2 = baseCut2;
+    smoothedCut1 += (baseCut1 - smoothedCut1) * 0.005;
+    smoothedCut2 += (baseCut2 - smoothedCut2) * 0.005;
+
+    const float kt = readFloatAP(p.layerKeytrack[layerIndex], p.layerKeytrackF[layerIndex], 0.f);
+    const double ktSemi = (double)(midiNote - 60) * (double)kt * 0.12;
+    const double cut1 = smoothedCut1 * std::pow(2.0, ktSemi / 12.0);
+    const double cut2 = smoothedCut2 * std::pow(2.0, ktSemi / 12.0);
+
+    const double res1 = (double)readFloatAP(p.layerRes[layerIndex], p.layerResF[layerIndex], 1.f) + (double)modMatrixResAdd;
+    const double res2 = (double)readFloatAP(p.layerF2res[layerIndex], p.layerF2resF[layerIndex], 1.f)
+                        + (double)modMatrixResAdd * 0.5;
     const double modSemi = filtEnv * 36.0 + globalLfoValue * 14.0 * (double)lfoDep + layerLfo * 10.0
-                           + (double)modMatrixCutSemi + layerLfo2 * 10.0 * (double)lfo2DepN;
+                           + (double)modMatrixCutSemi + l2v * 10.0 * (double)lfo2DepN;
 
-    const int ftype = readChoiceIndex(p.layerFtype[layerIndex], 8, 0);
-    updateFilterCoeffs(ftype, smoothedCut, resCtrl, modSemi);
+    const int t1 = readChoiceIndex(p.layerFtype[layerIndex], 8, 0);
+    const int t2 = readChoiceIndex(p.layerF2type[layerIndex], 8, 0);
+    configureFilterBank(f1, f1s, t1, cut1, res1, modSemi, combDelaySamples1, combFeedback1, combWritePos1, combBuf1);
+    configureFilterBank(f2, f2s, t2, cut2, res2, modSemi, combDelaySamples2, combFeedback2, combWritePos2, combBuf2);
+
+    const double d1 = (double)readFloatAP(p.layerFilterDrive[layerIndex], p.layerFilterDriveF[layerIndex], 0.f);
+    const double d2 = (double)readFloatAP(p.layerF2drive[layerIndex], p.layerF2driveF[layerIndex], 0.f);
+    const double x0 = applyDrive(osc, d1);
 
     const bool parallel = readChoiceIndex(p.layerFilterRoute[layerIndex], 2, 0) == 1;
 
     double y = 0;
-    if (ftype == 6 && combDelaySamples > 0)
+    if (parallel)
     {
-        const int d = combDelaySamples;
-        const int wp = combWritePos;
-        const int rp = (wp - d + 2048) % 2048;
-        const double delayed = combBuf[(size_t)rp];
-        y = osc + combFeedback * delayed;
-        combBuf[(size_t)wp] = y;
-        combWritePos = (wp + 1) % 2048;
+        const double a = processFilterPair(f1, f1s, t1, x0, combDelaySamples1, combFeedback1, combWritePos1, combBuf1);
+        const double b = processFilterPair(f2, f2s, t2, applyDrive(osc, d2), combDelaySamples2, combFeedback2, combWritePos2, combBuf2);
+        y = 0.5 * (a + b);
     }
-    else if (ftype == 7)
-        y = f2.process(f1.process(osc));
-    else if (parallel)
-        y = 0.5 * (f1.process(osc) + f2.process(osc));
     else
-        y = f2.process(f1.process(osc));
+    {
+        const double a = processFilterPair(f1, f1s, t1, x0, combDelaySamples1, combFeedback1, combWritePos1, combBuf1);
+        y = processFilterPair(f2, f2s, t2, applyDrive(a, d2), combDelaySamples2, combFeedback2, combWritePos2, combBuf2);
+    }
 
     double sig = y * (double)velocity * ampEnv;
 
     const float vol = readFloatAP(p.layerVol[layerIndex], p.layerVolF[layerIndex], 0.75f);
     const float pan = readFloatAP(p.layerPan[layerIndex], p.layerPanF[layerIndex], 0.f);
-    
-    if (smoothedVol < 0) smoothedVol = (double)vol;
+
+    if (smoothedVol < 0)
+        smoothedVol = (double)vol;
     smoothedVol += ((double)vol - smoothedVol) * 0.005;
     smoothedPan += ((double)pan - smoothedPan) * 0.005;
 
     sig *= smoothedVol;
-
-    // Apply mod matrix amplitude modulation (tremolo): multiplicative, clamped [0, 2]
     sig *= (double)juce::jlimit(0.f, 2.f, modMatrixAmpMul);
 
-    // Apply mod matrix pan modulation (auto-pan): additive bipolar offset clamped to [-1, 1]
     const double panBip = std::clamp(smoothedPan + (double)modMatrixPanAdd, -1.0, 1.0);
     const double pan01 = (panBip + 1.0) * 0.5;
     const double angle = pan01 * dsp::twoPi * 0.25;

@@ -100,6 +100,10 @@ private:
     std::array<std::atomic<float>*, 96> slotEqBandDb {};
     std::array<juce::AudioParameterFloat*, 96> slotEqBandParamF {};
 
+    /** Per FX slot (0–23) × 4 generic params: normalized 0-1 (`fx_sNN_p0`…`p3`). */
+    std::array<std::atomic<float>*, 96> slotParamDb {};
+    std::array<juce::AudioParameterFloat*, 96> slotParamParamF {};
+
     std::vector<std::unique_ptr<SlotDSP>> slotDSPs;
 
     /** Pre-sized in prepare(); no heap alloc in processBlock / processRack. */

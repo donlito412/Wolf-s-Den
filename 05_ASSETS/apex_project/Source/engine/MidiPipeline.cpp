@@ -780,8 +780,29 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
         {
             lastChordScaleId = cm.chordId;
             lastChordScaleRoot = cm.rootNote;
+            
+            // Rebuild table using the scale associated with the detected chord root
+            const auto& scales = theory.getScaleDefinitions();
+            const int* iv = nullptr;
+            int nIv = 0;
             static constexpr int kMajor[] = { 0, 2, 4, 5, 7, 9, 11 };
-            buildScaleLookupTable(chordScaleTable, cm.rootNote, kMajor, 7);
+            
+            if (theory.isDatabaseReady() && !scales.empty())
+            {
+                // For now we default to the active scale type but rooted at the chord root, 
+                // or if we had a specific chord-scale mapping we'd use that.
+                const int st = juce::jlimit(0, (int)scales.size() - 1, theory.getActiveScaleType());
+                iv = scales[(size_t)st].intervals.data();
+                nIv = (int)scales[(size_t)st].intervals.size();
+            }
+            
+            if (iv == nullptr || nIv == 0)
+            {
+                iv = kMajor;
+                nIv = 7;
+            }
+            
+            buildScaleLookupTable(chordScaleTable, cm.rootNote, iv, nIv);
         }
     }
     else if (keysMode == 4)
@@ -844,7 +865,23 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 if (chordOn)
                 {
                     const int tidx = readChordTypeIndex();
-                    const ChordTypeData& cd = kChordTypes[juce::jmin(tidx, kNumChordTypesUi - 1)];
+                    const auto& defs = theory.getChordDefinitions();
+                    const std::vector<int>* chordIv = nullptr;
+                    std::unique_ptr<std::vector<int>> allocatedChordIv;
+        
+                    if (theory.isDatabaseReady() && tidx >= 0 && tidx < (int)defs.size())
+                    {
+                        chordIv = &defs[(size_t)tidx].intervals;
+                    }
+                    else if (tidx >= 0 && tidx < kNumChordTypesUi)
+                    {
+                        allocatedChordIv = std::make_unique<std::vector<int>>(kChordTypes[tidx].iv, kChordTypes[tidx].iv + kChordTypes[tidx].n);
+                        chordIv = allocatedChordIv.get();
+                    }
+
+                    if (chordIv == nullptr)
+                        continue;
+
                     int chordRootMidi = *locked;
                     const int anch = readChordRootAnchor();
                     if (anch > 0)
@@ -857,7 +894,34 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
 
                     std::array<uint8_t, kMaxChordTones> notes {};
                     uint8_t nBuilt = 0;
-                    buildChordNotes(chordRootMidi, cd.iv, cd.n, readChordInversion(), notes, nBuilt);
+        
+                    // Use TheoryEngine's voice leading if enabled
+                    bool useVoiceLeading = false;
+                    if (auto* p = apvts.getRawParameterValue("theory_voice_leading"))
+                        useVoiceLeading = p->load(std::memory_order_relaxed) > 0.5f;
+
+                    if (useVoiceLeading && theory.isDatabaseReady())
+                    {
+                        // Find what's currently playing to minimize movement
+                        std::vector<int> currentNotes;
+                        for (const auto& m : chordMaps)
+                            if (m.used)
+                            {
+                                for (uint8_t i = 0; i < m.nOut; ++i)
+                                    currentNotes.push_back((int)m.outs[i]);
+                                break;
+                            }
+
+                        auto vr = theory.computeVoiceLeading(currentNotes, tidx, chordRootMidi % 12);
+                        for (size_t i = 0; i < vr.notes.size() && i < kMaxChordTones; ++i)
+                        {
+                            if (vr.notes[i] > 0)
+                                notes[nBuilt++] = (uint8_t)vr.notes[i];
+                        }
+                    }
+        
+                    if (nBuilt == 0 && chordIv != nullptr) // Default or Fallback
+                        buildChordNotes(chordRootMidi, chordIv->data(), (int)chordIv->size(), readChordInversion(), notes, nBuilt);
 
                     const int dens = readChordDensity();
                     const int cap = juce::jmin((int)nBuilt, juce::jmax(1, 3 + dens));

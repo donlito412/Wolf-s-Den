@@ -58,6 +58,12 @@ public:
      *  Stereo samples are averaged to mono; the stereo field is spread via pan in renderAdd. */
     float nextSampleMono() noexcept;
 
+    /** Read mono sample at absolute frame (linear interp). Does not move playback head.
+     *  Preloaded cache only (real-time safe). Uses startFrame/endFrame loop window. */
+    bool readMonoAt (double absoluteFrame, float& out) const noexcept;
+
+    int getLoopFrameCount() const noexcept;
+
     bool isActive()  const noexcept { return active; }
     bool hasBuffer() const noexcept { return cachedBuffer != nullptr; }
 

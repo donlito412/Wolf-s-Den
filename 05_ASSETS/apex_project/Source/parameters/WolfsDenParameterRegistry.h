@@ -42,6 +42,15 @@ enum class Registry : uint32_t
 
     perf_xy_physics = 0x01000601u,
 
+    synth_polyphony = 0x01000701u,
+    synth_legato = 0x01000702u,
+    synth_portamento = 0x01000703u,
+    lfo_sync = 0x01000704u,
+    lfo_sync_div = 0x01000705u,
+    lfo_delay = 0x01000706u,
+    lfo_fade = 0x01000707u,
+    lfo_retrigger = 0x01000708u,
+
     fx_reverb_mix = 0x01000501u,
     fx_delay_mix = 0x01000502u,
     fx_chorus_mix = 0x01000503u,

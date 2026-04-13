@@ -40,6 +40,8 @@ public:
     /** Switch to Patches mode and highlight the given preset id (called from TopBar). */
     void syncPresetSelectionFromProcessor();
 
+    const std::vector<int>& getFilteredPresetIndices() const noexcept { return filteredPresetIndices; }
+
     enum class BrowseMode { Patches, ChordSets };
     BrowseMode getMode() const noexcept { return currentMode; }
 

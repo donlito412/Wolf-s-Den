@@ -23,7 +23,8 @@ void addLayerParams(int layerIndex,
                     std::vector<std::unique_ptr<juce::RangedAudioParameter>>& out,
                     const juce::StringArray& oscChoices,
                     const juce::StringArray& filterTypeChoices,
-                    const juce::StringArray& lfoShapeChoices)
+                    const juce::StringArray& lfoShapeChoices,
+                    const juce::StringArray& lfoSyncDivChoices)
 {
     const juce::String pfx = "layer" + juce::String(layerIndex) + "_";
     const juce::StringArray filterRouteChoices({ "Serial", "Parallel" });
@@ -207,30 +208,114 @@ void addLayerParams(int layerIndex,
         "Layer " + juce::String(layerIndex + 1) + " Granular Scatter",
         juce::NormalisableRange<float>(0.f, 1.f, 0.f, 1.f),
         0.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid(pfx + "gran_freeze"),
+        "Layer " + juce::String(layerIndex + 1) + " Granular Freeze",
+        false));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "wavetable_morph"),
+        "Layer " + juce::String(layerIndex + 1) + " Wavetable Morph",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 1.f),
+        0.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "filter_keytrack"),
+        "Layer " + juce::String(layerIndex + 1) + " Filter Key Track",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.5f),
+        0.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid(pfx + "lfo2_sync"),
+        "Layer " + juce::String(layerIndex + 1) + " LFO2 Host Sync",
+        false));
+
+    out.push_back(std::make_unique<juce::AudioParameterChoice>(
+        pid(pfx + "lfo2_sync_div"),
+        "Layer " + juce::String(layerIndex + 1) + " LFO2 Sync Division",
+        lfoSyncDivChoices,
+        4));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "lfo2_delay"),
+        "Layer " + juce::String(layerIndex + 1) + " LFO2 Delay",
+        juce::NormalisableRange<float>(0.f, 2.f, 0.f, 0.5f),
+        0.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "lfo2_fade"),
+        "Layer " + juce::String(layerIndex + 1) + " LFO2 Fade-In",
+        juce::NormalisableRange<float>(0.f, 4.f, 0.f, 0.5f),
+        0.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid(pfx + "lfo2_retrigger"),
+        "Layer " + juce::String(layerIndex + 1) + " LFO2 Retrigger",
+        false));
 }
 } // namespace
 
-juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
+juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout(const TheoryEngine* theory)
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
     const juce::StringArray oscChoices(
-        { "Sine", "Saw", "Square", "Triangle", "Wavetable", "Granular", "FM", "Sample" });
+        { "Sine", "Saw", "Square", "Triangle", "Wavetable", "Granular", "FM", "Sample", "Noise" });
     const juce::StringArray filterTypeChoices(
         { "LP24", "LP12", "BP", "HP12", "Notch", "HP24", "Comb", "Formant" });
-    const juce::StringArray scaleTypeChoices(
-        { "Major", "Natural Minor", "Harmonic Minor", "Melodic Minor", "Dorian", "Phrygian", "Lydian",
-          "Mixolydian", "Pent Maj", "Pent Min", "Blues", "Whole Tone", "Diminished", "Chromatic" });
-    const juce::StringArray chordTypeChoices(
-        { "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4", "Maj7", "Min7", "Dom7", "Min7b5", "Dim7",
-          "MinMaj7", "Add9", "Maj9", "Min9" });
+
+    juce::StringArray scaleTypeChoices;
+    if (theory != nullptr)
+    {
+        for (const auto& s : theory->getScaleDefinitions())
+            scaleTypeChoices.add(s.name);
+    }
+    if (scaleTypeChoices.isEmpty())
+    {
+        scaleTypeChoices = { "Major", "Natural Minor", "Harmonic Minor", "Melodic Minor", "Dorian", "Phrygian", "Lydian",
+                             "Mixolydian", "Pent Maj", "Pent Min", "Blues", "Whole Tone", "Diminished", "Chromatic" };
+    }
+
+    juce::StringArray chordTypeChoices;
+    if (theory != nullptr)
+    {
+        for (const auto& c : theory->getChordDefinitions())
+            chordTypeChoices.add(c.name);
+    }
+    if (chordTypeChoices.isEmpty())
+    {
+        chordTypeChoices = { "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4", "Maj7", "Min7", "Dom7", "Min7b5", "Dim7",
+                             "MinMaj7", "Add9", "Maj9", "Min9" };
+    }
     const juce::StringArray chordRootAnchorChoices(
         { "Follow keys", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" });
     const juce::StringArray keysLockChoices(
         { "Off", "Remap", "Mute", "Chord Tones", "Chord Scales" });
     const juce::StringArray arpPatternChoices(
         { "Up", "Down", "Up-Down", "Order", "Chord", "Random" });
-    const juce::StringArray lfoShapeChoices({ "Sine", "Triangle", "Saw Up", "Square", "Random", "S&H" });
+    const juce::StringArray lfoShapeChoices(
+        { "Sine", "Triangle", "Saw Up", "Square", "S&H", "Random", "Saw Down", "Noise" });
+    const juce::StringArray lfoSyncDivChoices(
+        { "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars", "8 bars" });
+
+    params.push_back(std::make_unique<juce::AudioParameterInt>(
+        pid("synth_polyphony"),
+        "Synth Polyphony",
+        1,
+        16,
+        16));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid("synth_legato"),
+        "Synth Legato",
+        false));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid("synth_portamento"),
+        "Portamento Time",
+        juce::NormalisableRange<float>(0.f, 2.f, 0.f, 0.35f),
+        0.f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         pid("master_volume"),
@@ -288,6 +373,34 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         pid("lfo_shape"), "LFO Shape", lfoShapeChoices, 0));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid("lfo_sync"),
+        "LFO Host Sync",
+        false));
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        pid("lfo_sync_div"),
+        "LFO Sync Division",
+        lfoSyncDivChoices,
+        4));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid("lfo_delay"),
+        "LFO Delay",
+        juce::NormalisableRange<float>(0.f, 2.f, 0.f, 0.5f),
+        0.f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid("lfo_fade"),
+        "LFO Fade-In",
+        juce::NormalisableRange<float>(0.f, 4.f, 0.f, 0.5f),
+        0.f));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid("lfo_retrigger"),
+        "LFO Retrigger",
+        false));
 
     params.push_back(std::make_unique<juce::AudioParameterInt>(
         pid("theory_scale_root"), "Scale Root", 0, 11, 0));
@@ -493,7 +606,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
     }
 
     for (int L = 0; L < 4; ++L)
-        addLayerParams(L, params, oscChoices, filterTypeChoices, lfoShapeChoices);
+        addLayerParams(L, params, oscChoices, filterTypeChoices, lfoShapeChoices, lfoSyncDivChoices);
 
     return { params.begin(), params.end() };
 }

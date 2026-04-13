@@ -35,16 +35,20 @@ WolfsDenAudioProcessor::WolfsDenAudioProcessor()
 #endif
       ),
 #endif
-      apvts(*this, &undoManager, "Parameters", wolfsden::makeParameterLayout())
+      apvts(*this, &undoManager, "Parameters", [this] {
+          const auto dbDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                                 .getChildFile("Wolf Productions")
+                                 .getChildFile("Wolf's Den");
+          (void)dbDir.createDirectory();
+          // We must ensure the database is initialized BEFORE makeParameterLayout runs
+          // so we can fetch chord/scale names for the UI.
+          theoryEngine.initialise(dbDir.getChildFile("theory.db"));
+          return wolfsden::makeParameterLayout(&theoryEngine);
+      }())
 {
     juce::ignoreUnused(kWolfsDenBuildVerify);
     registerApvtsListeners();
 
-    const auto dbDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                           .getChildFile("Wolf Productions")
-                           .getChildFile("Wolf's Den");
-    (void)dbDir.createDirectory();
-    theoryEngine.initialise(dbDir.getChildFile("theory.db"));
     syncTheoryParamsFromApvts();
 
     // Factory WAVs live at …/Contents/Resources/Factory (CMake POST_BUILD copy)
@@ -239,7 +243,7 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     else if (synthLayerBus.getNumSamples() < n)
         synthLayerBus.setSize(8, n, false, false, true);
 
-    synthEngine.process(synthLayerBus, n, midi, apvts);
+    synthEngine.process(synthLayerBus, n, midi, apvts, getPlayHead());
     fxEngine.processBlock(synthLayerBus,
                           buffer,
                           apvts,
@@ -483,11 +487,24 @@ void WolfsDenAudioProcessor::applyFactoryPreset (const wolfsden::PresetListing& 
     }
 }
 
-void WolfsDenAudioProcessor::cyclePreset (int delta)
+void WolfsDenAudioProcessor::cyclePreset (int delta, const std::vector<int>& filteredIndices)
 {
     if (!theoryEngine.isDatabaseReady()) return;
-    const auto& list = theoryEngine.getPresetListings();
-    if (list.empty()) return;
+    const auto& fullList = theoryEngine.getPresetListings();
+    if (fullList.empty()) return;
+
+    // Use filters from UI if provided; otherwise use full list indices 0...N-1
+    std::vector<int> targetIndices;
+    if (!filteredIndices.empty())
+    {
+        targetIndices = filteredIndices;
+    }
+    else
+    {
+        targetIndices.resize (fullList.size());
+        for (int i = 0; i < (int)fullList.size(); ++i)
+            targetIndices[(size_t)i] = i;
+    }
 
     int curId = -1;
     {
@@ -495,20 +512,32 @@ void WolfsDenAudioProcessor::cyclePreset (int delta)
         curId = currentPresetId;
     }
 
-    // Find current index
-    int idx = 0;
-    for (int i = 0; i < (int) list.size(); ++i)
+    // Find current index within our target indices
+    int idx = -1;
+    for (int i = 0; i < (int) targetIndices.size(); ++i)
     {
-        if (list[(size_t)i].id == curId)
+        int listIdx = targetIndices[(size_t)i];
+        if (listIdx >= 0 && listIdx < (int)fullList.size())
         {
-            idx = i;
-            break;
+            if (fullList[(size_t)listIdx].id == curId)
+            {
+                idx = i;
+                break;
+            }
         }
     }
 
-    idx += delta;
-    idx = (idx % (int)list.size() + (int)list.size()) % (int)list.size();
-    loadPresetById (list[(size_t)idx].id);
+    // If current preset not in filtered list, start from the beginning
+    if (idx == -1) idx = 0;
+    else
+    {
+        idx += delta;
+        idx = (idx % (int)targetIndices.size() + (int)targetIndices.size()) % (int)targetIndices.size();
+    }
+
+    int nextListIdx = targetIndices[(size_t)idx];
+    if (nextListIdx >= 0 && nextListIdx < (int)fullList.size())
+        loadPresetById (fullList[(size_t)nextListIdx].id);
 }
 
 int WolfsDenAudioProcessor::getCurrentPresetId() const noexcept

@@ -25,6 +25,15 @@ struct ParamPointers
     std::atomic<float>* lfoRate = nullptr;
     std::atomic<float>* lfoDepth = nullptr;
     std::atomic<float>* lfoShape = nullptr;
+    std::atomic<float>* lfoSync = nullptr;
+    std::atomic<float>* lfoSyncDiv = nullptr;
+    std::atomic<float>* lfoDelay = nullptr;
+    std::atomic<float>* lfoFade = nullptr;
+    std::atomic<float>* lfoRetrigger = nullptr;
+
+    std::atomic<float>* synthPolyphony = nullptr;
+    std::atomic<float>* synthLegato = nullptr;
+    std::atomic<float>* synthPortamento = nullptr;
 
     juce::AudioParameterFloat* masterPitchF = nullptr;
     juce::AudioParameterFloat* masterVolF = nullptr;
@@ -34,18 +43,38 @@ struct ParamPointers
     juce::AudioParameterFloat* filterAdsrRF = nullptr;
     juce::AudioParameterFloat* lfoRateF = nullptr;
     juce::AudioParameterFloat* lfoDepthF = nullptr;
+    juce::AudioParameterFloat* lfoDelayF = nullptr;
+    juce::AudioParameterFloat* lfoFadeF = nullptr;
 
     std::atomic<float>* layerVol[4] {};
     std::atomic<float>* layerPan[4] {};
     std::atomic<float>* layerOsc[4] {};
     std::atomic<float>* layerCoarse[4] {};
     std::atomic<float>* layerFine[4] {};
+    std::atomic<float>* layerOctave[4] {};
     std::atomic<float>* layerCutoff[4] {};
     std::atomic<float>* layerRes[4] {};
     std::atomic<float>* layerFtype[4] {};
+    std::atomic<float>* layerFilterDrive[4] {};
+    std::atomic<float>* layerF2type[4] {};
+    std::atomic<float>* layerF2cutoff[4] {};
+    std::atomic<float>* layerF2res[4] {};
+    std::atomic<float>* layerF2drive[4] {};
+    std::atomic<float>* layerGranPos[4] {};
+    std::atomic<float>* layerGranSize[4] {};
+    std::atomic<float>* layerGranDensity[4] {};
+    std::atomic<float>* layerGranScatter[4] {};
+    std::atomic<float>* layerGranFreeze[4] {};
+    std::atomic<float>* layerWtMorph[4] {};
+    std::atomic<float>* layerKeytrack[4] {};
     std::atomic<float>* layerLfo2Rate[4] {};
     std::atomic<float>* layerLfo2Depth[4] {};
     std::atomic<float>* layerLfo2Shape[4] {};
+    std::atomic<float>* layerLfo2Sync[4] {};
+    std::atomic<float>* layerLfo2SyncDiv[4] {};
+    std::atomic<float>* layerLfo2Delay[4] {};
+    std::atomic<float>* layerLfo2Fade[4] {};
+    std::atomic<float>* layerLfo2Retrigger[4] {};
     std::atomic<float>* layerFilterRoute[4] {};
     std::atomic<float>* layerUnisonVoices[4] {};
     std::atomic<float>* layerUnisonDetune[4] {};
@@ -60,8 +89,20 @@ struct ParamPointers
     juce::AudioParameterFloat* layerFineF[4] {};
     juce::AudioParameterFloat* layerCutoffF[4] {};
     juce::AudioParameterFloat* layerResF[4] {};
+    juce::AudioParameterFloat* layerFilterDriveF[4] {};
+    juce::AudioParameterFloat* layerF2cutoffF[4] {};
+    juce::AudioParameterFloat* layerF2resF[4] {};
+    juce::AudioParameterFloat* layerF2driveF[4] {};
+    juce::AudioParameterFloat* layerGranPosF[4] {};
+    juce::AudioParameterFloat* layerGranSizeF[4] {};
+    juce::AudioParameterFloat* layerGranDensityF[4] {};
+    juce::AudioParameterFloat* layerGranScatterF[4] {};
+    juce::AudioParameterFloat* layerWtMorphF[4] {};
+    juce::AudioParameterFloat* layerKeytrackF[4] {};
     juce::AudioParameterFloat* layerLfo2RateF[4] {};
     juce::AudioParameterFloat* layerLfo2DepthF[4] {};
+    juce::AudioParameterFloat* layerLfo2DelayF[4] {};
+    juce::AudioParameterFloat* layerLfo2FadeF[4] {};
     juce::AudioParameterFloat* layerUnisonDetuneF[4] {};
     juce::AudioParameterFloat* layerUnisonSpreadF[4] {};
     juce::AudioParameterFloat* layerAAF[4] {};
@@ -73,60 +114,77 @@ struct ParamPointers
 class VoiceLayer
 {
 public:
-    void prepare(double sampleRate, const double* wavetable, int wavetableSize, const double* granularSource, int granularSize, int maxBlockSize = 512) noexcept;
+    void prepare(double sampleRate,
+                 const double* wavetableA,
+                 int wavetableSizeA,
+                 const double* wavetableB,
+                 int wavetableSizeB,
+                 const double* granularSource,
+                 int granularSize,
+                 int maxBlockSize = 512) noexcept;
     void reset() noexcept;
-    void noteOn(int midiNote, float velocity) noexcept;
+    void noteOn(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept;
+    void noteOnLegato(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept;
     void noteOff() noexcept;
 
-    /** Load a sample into this layer's WDSamplePlayer (call from a single worker thread — see SynthEngine::loadLayerSample). */
-    void loadSample (int sampleId, const juce::String& filePath,
-                     int rootNoteMidi, bool loopEnabled, bool oneShot,
-                     float startFrac = 0.f, float endFrac = 1.f)
+    void noteOnSteal(int midiNote,
+                     float velocity,
+                     int layerIndex,
+                     const ParamPointers& p,
+                     double ampEnvLevel,
+                     double filtEnvLevel) noexcept;
+
+    void loadSample(int sampleId,
+                    const juce::String& filePath,
+                    int rootNoteMidi,
+                    bool loopEnabled,
+                    bool oneShot,
+                    float startFrac = 0.f,
+                    float endFrac = 1.f)
     {
-        samplePlayer.loadNow (sampleId, filePath, rootNoteMidi, loopEnabled, oneShot, startFrac, endFrac);
+        samplePlayer.loadNow(sampleId, filePath, rootNoteMidi, loopEnabled, oneShot, startFrac, endFrac);
     }
 
     int currentSampleId() const noexcept { return samplePlayer.loadedId(); }
 
-    /** Sum stereo into L/R (accumulate).
-     *
-     *  modMatrixCutSemi  — additive filter cutoff shift in semitones from mod matrix.
-     *  modMatrixResAdd   — additive filter resonance (normalised) from mod matrix.
-     *  modMatrixPitchSemi— additive pitch shift in semitones from mod matrix (vibrato).
-     *  modMatrixAmpMul   — multiplicative amplitude scale from mod matrix (tremolo); 1.0 = unity.
-     *  modMatrixPanAdd   — additive bipolar pan offset from mod matrix (auto-pan).
-     */
     void renderAdd(double& outL,
                    double& outR,
                    int layerIndex,
                    int midiNote,
                    float velocity,
                    double globalLfoValue,
+                   double hostBpm,
                    const ParamPointers& p,
-                   float modMatrixCutSemi   = 0.f,
-                   float modMatrixResAdd    = 0.f,
+                   float modMatrixCutSemi = 0.f,
+                   float modMatrixResAdd = 0.f,
                    float modMatrixPitchSemi = 0.f,
-                   float modMatrixAmpMul    = 1.f,
-                   float modMatrixPanAdd    = 0.f) noexcept;
+                   float modMatrixAmpMul = 1.f,
+                   float modMatrixPanAdd = 0.f) noexcept;
 
     bool isActive() const noexcept { return ampAdsr.stage != wolfsden::dsp::Adsr::Stage::idle; }
 
     float getLastAmpEnv() const noexcept { return lastAmpEnvOut; }
     float getLastFiltEnv() const noexcept { return lastFiltEnvOut; }
+    double getAmpEnvLevel() const noexcept { return ampAdsr.level; }
+    double getFiltEnvLevel() const noexcept { return filtAdsr.level; }
 
 private:
     double sr = 44100;
     const double* wtData = nullptr;
+    const double* wtBData = nullptr;
     int wtLen = 2048;
     const double* granSource = nullptr;
     int granLen = 8192;
 
     int currentNote = 60;
     float currentVel = 0.8f;
+    double glideHz = 440.0;
+    double glideTargetHz = 440.0;
 
     double phaseSin = 0, phaseSaw = 0, phaseSq = 0, triIntegrator = 0;
     double phaseWt = 0, phaseSmpl = 0;
     double phaseFmCar = 0, phaseFmMod = 0;
+    uint32_t noiseOscState = 0x12345678u;
 
     struct Grain
     {
@@ -136,22 +194,30 @@ private:
         double winPos = 0;
         double winInc = 0;
         double amp = 1;
+        double pan = 0;
     };
     static constexpr int kMaxGrains = 16;
     std::array<Grain, kMaxGrains> grains {};
     int grainSpawnCounter = 0;
+    double granPlayhead = 0;
+    double frozenPlayhead = 0;
+    bool hadFreezeOn = false;
 
     wolfsden::dsp::Adsr ampAdsr;
     wolfsden::dsp::Adsr filtAdsr;
     wolfsden::dsp::Lfo lfoLayer;
     wolfsden::dsp::Lfo lfoLayer2;
 
-    wolfsden::dsp::Biquad f1, f2;
+    wolfsden::dsp::Biquad f1, f1s, f2, f2s;
 
-    std::array<double, 2048> combBuf {};
-    int combWritePos = 0;
-    int combDelaySamples = 0;
-    double combFeedback = 0.0;
+    std::array<double, 2048> combBuf1 {};
+    std::array<double, 2048> combBuf2 {};
+    int combWritePos1 = 0;
+    int combWritePos2 = 0;
+    int combDelaySamples1 = 0;
+    int combDelaySamples2 = 0;
+    double combFeedback1 = 0.0;
+    double combFeedback2 = 0.0;
 
     std::array<double, 8> uniSin {};
     std::array<double, 8> uniSaw {};
@@ -166,17 +232,33 @@ private:
 
     double smoothedVol = -1.0;
     double smoothedPan = 0.0;
-    double smoothedCut = -1.0;
+    double smoothedCut1 = -1.0;
+    double smoothedCut2 = -1.0;
+
+    double lfo2DelayRem = 0;
+    double lfo2FadeTotal = 0;
+    double lfo2FadeProg = 0;
 
     WDSamplePlayer samplePlayer;
 
     void updateAdsrTargets(int layerIndex, const ParamPointers& p) noexcept;
-    double readWavetable(double phase01) const noexcept;
+    double readWavetableMorph(double phase01, float morph01) const noexcept;
     double processOscillator(int oscType, double hz, int layerIdx, const ParamPointers& p) noexcept;
-    void updateFilterCoeffs(int filterType, double cutoffHz, double resonance, double modSemitones) noexcept;
+    void configureFilterBank(wolfsden::dsp::Biquad& f,
+                             wolfsden::dsp::Biquad& fs,
+                             int filterType,
+                             double cutoffHz,
+                             double resonance,
+                             double modSemitones,
+                             int& combDelay,
+                             double& combFb,
+                             int& combWritePos,
+                             std::array<double, 2048>& combBuf) noexcept;
     static void setBiquadIdentity(wolfsden::dsp::Biquad& b) noexcept;
-    void spawnGrain() noexcept;
-    double processGranular(double hz) noexcept;
+    void spawnGrain(int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept;
+    double processGranular(double hz, int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept;
+    static double beatsForSyncDivIndex(int divIdx) noexcept;
+    static bool readBoolNorm(std::atomic<float>* ap, bool defV) noexcept;
 };
 
 } // namespace wolfsden

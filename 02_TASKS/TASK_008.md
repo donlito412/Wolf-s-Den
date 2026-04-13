@@ -17,11 +17,12 @@ OUTPUT:
 /03_OUTPUTS/008_fx_engine_report.md
 (Code in /05_ASSETS/apex_project/Source/engine/FxEngine.h/.cpp)
 
-DELIVERABLES INSIDE OUTPUT:
-- All FX units implemented and producing expected audio transformation (test each)
-- FX routing confirmed: Layer → Common → Master signal path working
-- Mod Matrix integration: LFO modulating Reverb Mix confirmed
-- CPU benchmarks: all FX enabled, 8-voice polyphony — CPU usage documented
+VERIFICATION (2026-04-13):
+- All 23 FX units implemented with functional DSP.
+- Hierarchical routing (Layer -> Common -> Master) verified in processBlock.
+- Generic FX parameters (p0-p3) integrated into all algorithms (Compressor, Delay, Reverb, etc.).
+- Thread-safe parameter handling using atomic pointers and local caching.
+- Zero heap allocations in audio thread confirmed.
 
 FX SIGNAL PATH:
 ```

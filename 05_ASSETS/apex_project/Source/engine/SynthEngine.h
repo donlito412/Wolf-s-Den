@@ -27,7 +27,8 @@ public:
     void process(juce::AudioBuffer<float>& layerBus,
                  int numSamplesToProcess,
                  juce::MidiBuffer& midi,
-                 juce::AudioProcessorValueTreeState& apvts) noexcept;
+                 juce::AudioProcessorValueTreeState& apvts,
+                 juce::AudioPlayHead* playHead) noexcept;
 
     ModMatrix& getModMatrix() noexcept { return modMatrix; }
     const ModMatrix& getModMatrix() const noexcept { return modMatrix; }
@@ -69,11 +70,13 @@ private:
 
     void bindParameterPointers(juce::AudioProcessorValueTreeState& apvts);
     void fillWavetable() noexcept;
+    void fillWavetableB() noexcept;
     void fillGranularSource() noexcept;
 
+    int voicePolyLimit() const noexcept;
     int findFreeVoice() noexcept;
     int findOldestVoice() noexcept;
-    void startVoice(int voiceIndex, int note, float velocity) noexcept;
+    void startVoice(int voiceIndex, int note, float velocity, bool softSteal) noexcept;
     void noteOffKey(int note) noexcept;
     void deactivateFinishedVoices() noexcept;
 
@@ -81,12 +84,18 @@ private:
     int maxBlock = 512;
 
     std::array<double, kWtSize> wavetable {};
+    std::array<double, kWtSize> wavetableB {};
     std::array<double, kGranSize> granularBuffer {};
     std::array<Voice, kNumVoices> voices {};
     wolfsden::dsp::Lfo globalLfo;
     ModMatrix modMatrix;
 
     double lastGlobalLfoForMod = 0.0;
+    double globalLfoDelayRem = 0;
+    double globalLfoFadeTotal = 0;
+    double globalLfoFadeProg = 0;
+    bool globalLfoInitialised = false;
+    std::array<int, 128> keyDepth {};
     float lastFxReverbMixAdd = 0.f;
     float lastFxDelayMixAdd = 0.f;
     float lastFxChorusMixAdd = 0.f;

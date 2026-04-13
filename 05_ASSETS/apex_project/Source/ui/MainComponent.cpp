@@ -63,6 +63,12 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
     }
 
     topBar.onSelectPage = [this](int i) { showPage(i); };
+    topBar.onPresetNavigateRequested = [this](int delta) {
+        if (currentPage == 0) // Browse page
+            processor.cyclePreset(delta, pageBrowse.getFilteredPresetIndices());
+        else
+            processor.cyclePreset(delta);
+    };
     pageBrowse.onPresetOrSelectionChanged = [this] { topBar.refreshPresetLabel(); };
     topBar.onPresetNavigate = [this] {
         pageBrowse.syncPresetSelectionFromProcessor();

@@ -19,6 +19,8 @@ public:
     ~TopBar() override;
 
     std::function<void(int pageIndex)> onSelectPage;
+    /** Fired when < > buttons are clicked. */
+    std::function<void(int delta)> onPresetNavigateRequested;
     /** Fired after < > cycles to a new preset; UI should sync card selection. */
     std::function<void()> onPresetNavigate;
 
@@ -47,6 +49,8 @@ private:
     juce::TextButton presetNext { ">" };
     juce::Label presetLabel;
     juce::TextButton settingsBtn { "Settings" };
+    juce::TextButton undoBtn { "Undo" };
+    juce::TextButton redoBtn { "Redo" };
     juce::Label cpuLabel;
 
     juce::TextButton* const tabs[6] { &tabBrowse, &tabSynth, &tabTheory, &tabPerform, &tabFx, &tabMod };

@@ -206,13 +206,19 @@ void FxEngine::bindPointers(juce::AudioProcessorValueTreeState& state)
 
     for (int si = 0; si < 24; ++si)
     {
-        const juce::String pfx = "fx_s" + juce::String(si).paddedLeft('0', 2) + "_eq";
+        const juce::String pfxEq = "fx_s" + juce::String(si).paddedLeft('0', 2) + "_eq";
+        const juce::String pfxP = "fx_s" + juce::String(si).paddedLeft('0', 2) + "_p";
         for (int b = 0; b < 4; ++b)
         {
-            const juce::String eid = pfx + juce::String(b);
             const size_t flat = (size_t)(si * 4 + b);
+            
+            const juce::String eid = pfxEq + juce::String(b);
             slotEqBandDb[flat] = state.getRawParameterValue(eid);
             slotEqBandParamF[flat] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter(eid));
+            
+            const juce::String pid = pfxP + juce::String(b);
+            slotParamDb[flat] = state.getRawParameterValue(pid);
+            slotParamParamF[flat] = dynamic_cast<juce::AudioParameterFloat*>(state.getParameter(pid));
         }
     }
 }
@@ -294,36 +300,42 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
         auto& st = *slotDSPs[(size_t)(dspBaseIndex + s)];
         const auto t = (FxUnitType)ti;
         const double sr = sampleRate;
+        const int flat = dspBaseIndex + s;
+        
+        auto readP = [&](int pIdx) {
+            return readFloatAP(slotParamDb[(size_t)(flat * 4 + pIdx)], slotParamParamF[(size_t)(flat * 4 + pIdx)], 0.5f);
+        };
 
         if (t == FxUnitType::Reverb || t == FxUnitType::ReverbPlate || t == FxUnitType::ReverbSpring)
         {
             const int revKey = (t == FxUnitType::ReverbPlate) ? 1 : (t == FxUnitType::ReverbSpring) ? 2 : 0;
+            const float size = readP(0);
+            const float damp = readP(1);
+            
             if (st.revPresetKey != revKey)
             {
                 st.revPresetKey = revKey;
                 juce::dsp::Reverb::Parameters p;
-                if (t == FxUnitType::ReverbPlate)
-                {
-                    p.roomSize = 0.42f;
-                    p.damping = 0.28f;
-                }
-                else if (t == FxUnitType::ReverbSpring)
-                {
-                    p.roomSize = 0.68f;
-                    p.damping = 0.58f;
-                }
-                else
-                {
-                    p.roomSize = 0.58f;
-                    p.damping = 0.42f;
-                }
+                p.roomSize = size;
+                p.damping = damp;
                 p.wetLevel = 1.f;
                 p.dryLevel = 0.f;
                 p.width = 1.f;
                 st.rev.setParameters(p);
             }
+            else
+            {
+                // Update size/damp if changed
+                auto p = st.rev.getParameters();
+                if (std::abs(p.roomSize - size) > 0.001f || std::abs(p.damping - damp) > 0.001f)
+                {
+                    p.roomSize = size;
+                    p.damping = damp;
+                    st.rev.setParameters(p);
+                }
+            }
 
-            const float preMs = (t == FxUnitType::ReverbPlate) ? 22.f : (t == FxUnitType::ReverbSpring) ? 14.f : 32.f;
+            const float preMs = (t == FxUnitType::ReverbPlate) ? 22.f : (t == FxUnitType::ReverbSpring) ? 14.f : (32.f * readP(2));
             const int maxPre = juce::jmax(2, st.revPreL.getMaximumDelayInSamples() - 1);
             const int preSamps = juce::jlimit(1, maxPre, (int)(sr * 0.001 * (double)preMs));
 
@@ -348,13 +360,17 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
 
         if (t == FxUnitType::Eq4Band)
         {
-            const int flat = dspBaseIndex + s;
             st.updateEqIfNeeded(sr,
                                 readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 0)], slotEqBandParamF[(size_t)(flat * 4 + 0)], 0.f),
                                 readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 1)], slotEqBandParamF[(size_t)(flat * 4 + 1)], 0.f),
                                 readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 2)], slotEqBandParamF[(size_t)(flat * 4 + 2)], 0.f),
                                 readFloatAP(slotEqBandDb[(size_t)(flat * 4 + 3)], slotEqBandParamF[(size_t)(flat * 4 + 3)], 0.f));
         }
+
+        const float p0 = readP(0);
+        const float p1 = readP(1);
+        const float p2 = readP(2);
+        const float p3 = readP(3);
 
         for (int i = 0; i < numSamples; ++i)
         {
@@ -375,32 +391,33 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 case FxUnitType::Compressor:
                 {
                     const float det = std::abs(0.5f * (dryL + dryR));
-                    const float atk = std::exp(-1.f / (float)(sr * 0.003));
-                    const float rel = std::exp(-1.f / (float)(sr * 0.08));
+                    const float atk = std::exp(-1.f / (float)(sr * (0.001 + p0 * 0.1)));
+                    const float rel = std::exp(-1.f / (float)(sr * (0.01 + p1 * 1.0)));
                     st.cEnv = det > st.cEnv ? atk * st.cEnv + (1.f - atk) * det : rel * st.cEnv + (1.f - rel) * det;
-                    const float thresh = 0.35f;
-                    const float ratio = 4.f;
+                    const float thresh = 0.01f + (1.f - p2) * 0.9f;
+                    const float ratio = 1.f + p3 * 19.f;
                     float g = 1.f;
                     if (st.cEnv > thresh)
                         g = thresh + (st.cEnv - thresh) / ratio;
-                    g = juce::jlimit(0.2f, 1.f, g / juce::jmax(1.e-5f, st.cEnv));
+                    g = juce::jlimit(0.01f, 1.f, g / juce::jmax(1.e-5f, st.cEnv));
                     wetL *= g;
                     wetR *= g;
                     break;
                 }
                 case FxUnitType::Limiter:
                 {
-                    const float ceil = 0.92f;
-                    wetL = softClip(dryL * 1.1f) * ceil;
-                    wetR = softClip(dryR * 1.1f) * ceil;
+                    const float ceil = 0.5f + p0 * 0.49f;
+                    const float drv = 1.f + p1 * 3.f;
+                    wetL = softClip(dryL * drv) * ceil;
+                    wetR = softClip(dryR * drv) * ceil;
                     break;
                 }
                 case FxUnitType::Gate:
                 {
                     const float det = std::abs(0.5f * (dryL + dryR));
-                    const float thr = 0.02f + m * 0.08f;
-                    const float atk = std::exp(-1.f / (float)(sr * 0.0005));
-                    const float rel = std::exp(-1.f / (float)(sr * 0.05));
+                    const float thr = 0.001f + p0 * 0.5f;
+                    const float atk = std::exp(-1.f / (float)(sr * (0.0001 + p1 * 0.01)));
+                    const float rel = std::exp(-1.f / (float)(sr * (0.001 + p2 * 0.5)));
                     const float target = det > thr ? 1.f : 0.f;
                     st.gateEnv = target > st.gateEnv ? atk * st.gateEnv + (1.f - atk) * target
                                                      : rel * st.gateEnv + (1.f - rel) * target;
@@ -420,36 +437,47 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::HighPass:
                 {
+                    const float f = juce::jlimit(20.f, 20000.f, 20.f * std::pow(1000.f, p0));
+                    st.hpL.setCutoffFrequency(f);
+                    st.hpR.setCutoffFrequency(f);
+                    st.hpL.setResonance(0.707f + p1 * 4.f);
+                    st.hpR.setResonance(0.707f + p1 * 4.f);
                     wetL = st.hpL.processSample(0, dryL);
                     wetR = st.hpR.processSample(0, dryR);
                     break;
                 }
                 case FxUnitType::LowPass:
                 {
+                    const float f = juce::jlimit(20.f, 20000.f, 20.f * std::pow(1000.f, p0));
+                    st.lpL.setCutoffFrequency(f);
+                    st.lpR.setCutoffFrequency(f);
+                    st.lpL.setResonance(0.707f + p1 * 4.f);
+                    st.lpR.setResonance(0.707f + p1 * 4.f);
                     wetL = st.lpL.processSample(0, dryL);
                     wetR = st.lpR.processSample(0, dryR);
                     break;
                 }
                 case FxUnitType::SoftClip:
                 {
-                    const float d = 1.f + m * 8.f;
+                    const float d = 1.f + p0 * 20.f;
                     wetL = softClip(dryL * d);
                     wetR = softClip(dryR * d);
                     break;
                 }
                 case FxUnitType::HardClip:
                 {
-                    const float c = 0.5f + m * 0.45f;
-                    wetL = hardClip(dryL * (1.f + m * 4.f), c);
-                    wetR = hardClip(dryR * (1.f + m * 4.f), c);
+                    const float drv = 1.f + p0 * 20.f;
+                    const float c = 0.05f + p1 * 0.95f;
+                    wetL = hardClip(dryL * drv, c);
+                    wetR = hardClip(dryR * drv, c);
                     break;
                 }
                 case FxUnitType::BitCrusher:
                 {
-                    const int bits = juce::jlimit(2, 16, (int)(4 + m * 12.f));
+                    const int bits = juce::jlimit(1, 16, (int)(1 + p0 * 15.f));
                     const float scl = std::pow(2.f, (float)bits - 1.f);
                     st.decimPhase += 1.f;
-                    const float holdEvery = 1.f + m * 32.f;
+                    const float holdEvery = 1.f + p1 * 64.f;
                     if (st.decimPhase >= holdEvery)
                     {
                         st.decimPhase = 0.f;
@@ -462,39 +490,38 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::Waveshaper:
                 {
-                    const float d = 1.f + m * 6.f;
-                    wetL = std::tanh(dryL * d * 1.4f);
-                    wetR = std::tanh(dryR * d * 1.4f);
+                    const float d = 1.f + p0 * 12.f;
+                    wetL = std::tanh(dryL * d);
+                    wetR = std::tanh(dryR * d);
                     break;
                 }
                 case FxUnitType::Chorus:
                 case FxUnitType::Vibrato:
                 {
-                    const float rate = (t == FxUnitType::Vibrato) ? 5.f : 0.35f;
+                    const float rate = (t == FxUnitType::Vibrato) ? (0.1f + p0 * 10.f) : (0.05f + p0 * 2.f);
                     st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float mod = std::sin(st.lfo) * (t == FxUnitType::Vibrato ? 0.02f : 0.008f) * (m * 25.f);
-                    const int del = juce::jlimit(1, (int)(sr * 0.05), (int)(sr * 0.02 + mod * sr));
+                    const float modScl = (t == FxUnitType::Vibrato ? 0.005f : 0.002f) * p1;
+                    const float mod = std::sin(st.lfo) * modScl;
+                    const int del = juce::jlimit(1, (int)(sr * 0.05), (int)(sr * (0.01 + mod)));
                     st.dL.pushSample(0, dryL);
                     st.dR.pushSample(0, dryR);
                     wetL = st.dL.popSample(0, (float)del, true);
                     wetR = st.dR.popSample(0, (float)del, true);
-                    if (t == FxUnitType::Vibrato)
-                    {
-                        wetL = dryL * (1.f - m) + wetL * m;
-                        wetR = dryR * (1.f - m) + wetR * m;
-                    }
                     break;
                 }
                 case FxUnitType::Flanger:
                 {
-                    st.lfo += juce::MathConstants<float>::twoPi * 0.25f / (float)sr;
+                    const float rate = 0.05f + p0 * 5.f;
+                    st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float mod = (0.5f + 0.5f * std::sin(st.lfo)) * (float)(sr * 0.002 * (0.5f + m));
-                    st.dL.pushSample(0, dryL + st.fbL * 0.45f * m);
-                    st.dR.pushSample(0, dryR + st.fbR * 0.45f * m);
+                    const float modScl = 0.001f + p1 * 0.005f;
+                    const float mod = (0.5f + 0.5f * std::sin(st.lfo)) * (float)(sr * modScl);
+                    const float fb = p2 * 0.85f;
+                    st.dL.pushSample(0, dryL + st.fbL * fb);
+                    st.dR.pushSample(0, dryR + st.fbR * fb);
                     wetL = st.dL.popSample(0, 1.f + mod, true);
                     wetR = st.dR.popSample(0, 1.f + mod, true);
                     st.fbL = wetL;
@@ -503,10 +530,11 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::Phaser:
                 {
-                    st.lfo += juce::MathConstants<float>::twoPi * 0.2f / (float)sr;
+                    const float rate = 0.05f + p0 * 5.f;
+                    st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float coef = 0.65f + 0.3f * std::sin(st.lfo) * m;
+                    const float coef = 0.1f + p1 * 0.85f + 0.05f * std::sin(st.lfo);
                     auto ap = [&](float x, int k) {
                         const float y = coef * (x - st.phz[(size_t)k]) + st.phz[(size_t)k];
                         st.phz[(size_t)k] = y;
@@ -518,31 +546,34 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::Tremolo:
                 {
-                    st.lfo += juce::MathConstants<float>::twoPi * 4.f / (float)sr;
+                    const float rate = 0.1f + p0 * 20.f;
+                    st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float g = 1.f - m * 0.45f * (0.5f + 0.5f * std::sin(st.lfo));
+                    const float g = 1.f - p1 * (0.5f + 0.5f * std::sin(st.lfo));
                     wetL = dryL * g;
                     wetR = dryR * g;
                     break;
                 }
                 case FxUnitType::AutoPan:
                 {
-                    st.lfo += juce::MathConstants<float>::twoPi * 2.f / (float)sr;
+                    const float rate = 0.1f + p0 * 10.f;
+                    st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float p = 0.5f + 0.5f * std::sin(st.lfo);
+                    const float depth = p1;
+                    const float p = 0.5f + 0.5f * std::sin(st.lfo) * depth;
                     const float gL = std::sqrt(p);
                     const float gR = std::sqrt(1.f - p);
-                    wetL = dryL * (1.f - m) + dryL * gL * m;
-                    wetR = dryR * (1.f - m) + dryR * gR * m;
+                    wetL = dryL * gL;
+                    wetR = dryR * gR;
                     break;
                 }
                 case FxUnitType::DelayStereo:
                 {
-                    const int ms = (int)(80 + m * 420);
-                    const int del = juce::jlimit(1, (int)(sr * 0.5), (int)(sr * 0.001 * (double)ms));
-                    const float fb = 0.35f * m;
+                    const float ms = 1.f + p0 * 999.f;
+                    const int del = juce::jlimit(1, (int)(sr * 1.0), (int)(sr * 0.001 * (double)ms));
+                    const float fb = p1 * 0.95f;
                     st.dL.pushSample(0, dryL + st.fbL * fb);
                     st.dR.pushSample(0, dryR + st.fbR * fb);
                     wetL = st.dL.popSample(0, (float)del, true);
@@ -553,8 +584,9 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::DelayPingPong:
                 {
-                    const int del = juce::jlimit(1, (int)(sr * 0.5), (int)(sr * 0.15 * (0.5 + m)));
-                    const float fb = 0.42f * m;
+                    const float ms = 1.f + p0 * 999.f;
+                    const int del = juce::jlimit(1, (int)(sr * 1.0), (int)(sr * 0.001 * (double)ms));
+                    const float fb = p1 * 0.95f;
                     st.dL.pushSample(0, dryL + st.fbR * fb);
                     st.dR.pushSample(0, dryR + st.fbL * fb);
                     wetL = st.dL.popSample(0, (float)del, true);
@@ -565,7 +597,7 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::StereoWidth:
                 {
-                    const float w = juce::jmap(m, 0.5f, 2.f);
+                    const float w = p0 * 2.f;
                     const float M = 0.5f * (dryL + dryR);
                     float S = 0.5f * (dryL - dryR);
                     S *= w;
@@ -575,9 +607,13 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::MonoBass:
                 {
+                    const float f = 20.f + p0 * 480.f;
+                    const float alpha = 1.f / (1.f + (float)sr / (juce::MathConstants<float>::twoPi * f));
                     const float mono = 0.5f * (dryL + dryR);
-                    wetL = dryL * (1.f - m) + mono * m;
-                    wetR = dryR * (1.f - m) + mono * m;
+                    st.monoLpL = (1.f - alpha) * st.monoLpL + alpha * mono;
+                    const float S = 0.5f * (dryL - dryR) * (1.f - p1);
+                    wetL = st.monoLpL + S;
+                    wetR = st.monoLpL - S;
                     break;
                 }
                 default:

@@ -52,6 +52,7 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
 
     /** Shared with on-screen MIDI keyboard(s); merged into processBlock MIDI stream. */
@@ -88,8 +89,11 @@ public:
      */
     bool loadPresetById (int presetId);
 
-    /** Step forward (+1) or backward (-1) through the loaded preset list. */
-    void cyclePreset (int delta);
+    /**
+     * Step forward (+1) or backward (-1) through the currently filtered list in the UI,
+     * or the full list if no filter is active.
+     */
+    void cyclePreset (int delta, const std::vector<int>& filteredIndices = {});
 
     /** The DB id of the last successfully loaded/saved preset (-1 = none). */
     int  getCurrentPresetId() const noexcept;

@@ -71,7 +71,7 @@ private:
     int activeLayer = 0;
 
     std::array<juce::TextButton, 4> layerTab;
-    std::array<juce::TextButton, 8> oscModeBtn;
+    std::array<juce::TextButton, 9> oscModeBtn;
     WaveformPreview wavePreview;
     juce::Label granularHint;
 
@@ -81,8 +81,11 @@ private:
     juce::Slider oscFine;
 
     // Granular-specific controls (visible only when osc mode == Granular)
+    juce::ToggleButton granFreeze { "Freeze" };
     juce::Slider granPos, granSize, granDensity, granScatter;
     juce::Label  lblGranPos, lblGranSize, lblGranDensity, lblGranScatter;
+    juce::Slider wavetableMorph;
+    juce::Label  lblWtMorph;
     juce::Rectangle<int> zoneGranular;
 
     // Filter 1
@@ -90,6 +93,8 @@ private:
     juce::Slider fCut;
     juce::Slider fRes;
     juce::Slider fDrive;   // new
+    juce::Slider filterKeytrack;
+    juce::Label  lblKeyTr;
 
     // Filter 2
     juce::Label    lblFilter2Header;
@@ -113,8 +118,24 @@ private:
 
     juce::Slider lfo1Rate, lfo1Depth;
     juce::ComboBox lfo1Shape;
+    juce::ToggleButton lfo1Sync { "Sync" };
+    juce::ComboBox lfo1SyncDiv;
+    juce::Slider lfo1Delay, lfo1Fade;
+    juce::ToggleButton lfo1Retrigger { "Rtrg" };
+    juce::Label lblL1Del, lblL1Fd;
+
     juce::Slider lfo2Rate, lfo2Depth;
     juce::ComboBox lfo2Shape;
+    juce::ToggleButton lfo2Sync { "Sync" };
+    juce::ComboBox lfo2SyncDiv;
+    juce::Slider lfo2Delay, lfo2Fade;
+    juce::ToggleButton lfo2Retrigger { "Rtrg" };
+    juce::Label lblL2Del, lblL2Fd;
+
+    juce::Slider synthPolyphony;
+    juce::ToggleButton synthLegato { "Legato" };
+    juce::Slider synthPortamento;
+    juce::Label lblPoly, lblGlide;
 
     // Sample browser (visible only when osc type == 7 "Smp")
     juce::TextButton loadSampleBtn { "Browse Samples…" };
@@ -138,11 +159,15 @@ private:
     juce::Label lblL1R, lblL1D, lblL1Sh;
     juce::Label lblL2R, lblL2D, lblL2Sh;
 
+    int lastOscTypeIndex = 0;
+
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> globalSAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> globalCAtt;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> globalBAtt;
 
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> layerSAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> layerCAtt;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> layerBAtt;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SynthPage)
 };

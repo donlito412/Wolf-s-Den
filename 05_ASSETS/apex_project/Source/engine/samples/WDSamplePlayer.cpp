@@ -256,6 +256,45 @@ bool WDSamplePlayer::processBlock (juce::AudioBuffer<float>& buffer,
     return active;
 }
 
+int WDSamplePlayer::getLoopFrameCount() const noexcept
+{
+    return juce::jmax (1, endFrame - startFrame + 1);
+}
+
+bool WDSamplePlayer::readMonoAt (double absoluteFrame, float& out) const noexcept
+{
+    out = 0.f;
+    if (cachedBuffer == nullptr || cachedBuffer->getNumSamples() < 2)
+        return false;
+
+    const auto* src          = cachedBuffer.get();
+    const int   totalSrcFrames = src->getNumSamples();
+    const int   srcChannels    = src->getNumChannels();
+    const int   span           = juce::jmax (1, endFrame - startFrame + 1);
+
+    double f = absoluteFrame;
+    if (looping)
+    {
+        while (f < (double) startFrame) f += (double) span;
+        while (f > (double) endFrame) f -= (double) span;
+    }
+    else
+        f = juce::jlimit ((double) startFrame, (double) endFrame, f);
+
+    const int posI = juce::jlimit (0, totalSrcFrames - 2, (int) std::floor (f));
+    const float frac = (float) (f - (double) posI);
+    const int i1 = juce::jmin (posI + 1, totalSrcFrames - 1);
+
+    float sL = lerp (src->getSample (0, posI), src->getSample (0, i1), frac);
+    if (srcChannels >= 2)
+    {
+        const float sR = lerp (src->getSample (1, posI), src->getSample (1, i1), frac);
+        sL = (sL + sR) * 0.5f;
+    }
+    out = sL;
+    return true;
+}
+
 float WDSamplePlayer::nextSampleMono() noexcept
 {
     swapBufferIfReady();

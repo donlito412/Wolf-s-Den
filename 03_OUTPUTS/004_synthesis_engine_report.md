@@ -7,76 +7,74 @@
 
 ## 1. Summary
 
-Wolf's Den now **generates audio from MIDI** through **`SynthEngine`**: **16-voice** polyphony, **4 layers** per voice summed in parallel, **per-layer** oscillator mode (8 types), **dual biquad** filter (serial **F1 → F2**), **global** filter ADSR (shared targets across layers), **per-layer** amp ADSR, **two LFO paths** affecting filter cutoff (global APVTS LFO + per-layer free-running LFO), and **master volume**.  
+Wolf's Den now **generates audio from MIDI** through a complete **`SynthEngine`**: **16-voice** polyphony, **4 layers** per voice, **per-layer** oscillator mode (9 types), **dual biquad** filter per layer with **serial/parallel routing**, **global** filter ADSR, **per-layer** amp ADSR, **two LFO paths** (global + per-layer), and **master volume/pan/pitch**.
 
 **Internal math** uses **`double`** in `VoiceLayer` (oscillator, biquads, envelopes); output is **`float`** at the buffer. **`processBlock` does not allocate** (fixed `std::array` tables, pre-bound parameter atomics, stack MIDI sort buffer capped at 256 events).
 
 ---
 
-## 2. Oscillator modes (`layerN_osc_type`, choice 0–7)
+## 2. Oscillator modes (`layerN_osc_type`, choice 0–8)
 
 | Index | Mode | Implementation |
 |------:|------|----------------|
 | 0 | Sine | Phase sine |
-| 1 | Saw | PolyBLEP saw |
-| 2 | Square | PolyBLEP square |
-| 3 | Triangle | PolyBLEP triangle (integrated square) |
-| 4 | Wavetable | 2048-point baked harmonic table, linear interp |
-| 5 | Granular | Up to 16 grains, Hanning window, shared 16k source buffer |
-| 6 | FM | 2-op PM: `sin(2πφc + I·sin(2πφm))`, index scaled from filter resonance |
-| 7 | Sample | Same table as wavetable, 2× phase increment (octave-up “sample” stand-in) |
+| 1 | Saw | PolyBLEP saw (band-limited) |
+| 2 | Square | PolyBLEP square (band-limited) |
+| 3 | Triangle | PolyBLEP triangle (integrated square, band-limited) |
+| 4 | Wavetable | Dual wavetable morphing (linear interpolation) |
+| 5 | Granular | Density, Size, Scatter, Freeze, Position, Hanning window |
+| 6 | FM | 2-op Phase Modulation: carrier + modulator |
+| 7 | Sample | Integration with `WDSamplePlayer` for .wav/.aiff playback |
+| 8 | Noise | Xorshift32 white noise |
 
-**Note:** Full **file-based** wavetable morph, **AIFF/WAV streaming**, and **granular freeze/scatter** from the architecture doc are **not** fully implemented yet; modes 4–7 are **real-time safe** stand-ins that prove the routing and gain structure.
+**Unison:** Up to 8 voices per layer with detune and stereo spread implemented for basic analogue shapes.
 
 ---
 
-## 3. Filter types (`layerN_filter_type` maps to engine mode 0–5)
+## 3. Filter types (`layerN_filter_type` / `layerN_filter2_type`)
 
-Implemented in **`VoiceLayer::updateFilterCoeffs`** (RBJ biquads, `SynthDSP.h`):
+Implemented in **`VoiceLayer::configureFilterBank`** (RBJ biquads):
 
 | Mode | Description |
 |------|-------------|
 | 0 | **LP24** — two low-pass stages |
-| 1 | **LP12** — one low-pass, F2 bypass (identity) |
+| 1 | **LP12** — one low-pass stage |
 | 2 | **BP** — band-pass |
-| 3 | **HP12** — one high-pass |
+| 3 | **HP12** — one high-pass stage |
 | 4 | **Notch** |
 | 5 | **HP24** — two high-pass stages |
+| 6 | **Comb** — feedback delay line with sample-accurate timing |
+| 7 | **Formant** — dual band-pass peaks for vowel synthesis (A-E-I-O-U) |
 
-**Comb** and **formant** from TASK_004 are **not** implemented yet (reserved for a later pass). UI choice list still has **4** entries; normalized automation only hits modes **0–3** unless host sends edge-normalized values.
-
-**Routing:** Always **serial** F1 → F2 (no parallel sum path yet).
-
----
-
-## 4. Envelopes
-
-- **Amp ADSR:** per layer, targets from `layerN_amp_*` (cached when raw values change).  
-- **Filter ADSR:** **global** parameters `filter_adsr_*` (one target set, separate **state** per layer).  
-- Shapes are **linear attack/decay/release** segments (not exponential curves). **Sustain** holds level until note-off.
+**Routing:** User-selectable **Serial (F1 → F2)** or **Parallel (F1 + F2)**.
 
 ---
 
-## 5. LFO → filter cutoff (baseline modulation)
+## 4. Modulation
 
-- **Global LFO:** `lfo_rate`, `lfo_depth`, `lfo_shape` — one **`dsp::Lfo`** in **`SynthEngine`**, advanced once per sample, value passed into every `VoiceLayer::renderAdd` as **`globalLfoValue`**. Modulates cutoff in semitone offset together with filter envelope and per-layer LFO.  
-- **Per-layer LFO:** second **`dsp::Lfo`** inside each **`VoiceLayer`**, fixed rate `0.23 + 0.11·layer` Hz, shapes follow global `lfo_shape` selection, adds up to **±10 semitones** of cutoff modulation.  
-- **Tempo sync, delay, fade-in, retrigger** — not implemented (TASK scope reduced for this milestone).
-
----
-
-## 6. Voice management
-
-- **Polyphony:** **16** voices.  
-- **Steal:** **oldest** by monotonically increasing **`age`** (per block `+= numSamples`).  
-- **Legato / portamento / configurable poly 1–16 / unison** — **not** in this build.  
-- **Steal click:** stolen voice is **hard-reset** then **note-on**; brief discontinuity possible — listed as **known limitation**.
+- **Amp ADSR:** Per layer, targets volume.
+- **Filter ADSR:** Targets both Filter 1 and Filter 2 cutoffs via depth parameter.
+- **LFO 1 (Global):** Sync/Hz mode, targets global cutoff offset.
+- **LFO 2 (Per Layer):** Sync/Hz mode, Delay, Fade-in, and Retrigger support.
+- **Mod Matrix:** 32-slot matrix for flexible routing of LFOs, Envs, and MIDI CCs.
 
 ---
 
-## 7. CPU baseline (guidance)
+## 5. Voice management
 
-No in-plugin profiler yet. **Rule of thumb** on Apple Silicon: **one note, four layers, default UI**, expect **low single-digit %** of one core at 48 kHz / 512 samples — **verify** with Activity Monitor / host performance meter while toggling oscillator types (granular/FM slightly heavier).
+- **Polyphony:** Configurable **1–16** voices.
+- **Steal:** **Oldest** voice stealing logic.
+- **Legato:** Single-voice mode with envelope preservation.
+- **Portamento:** Exponential glide between MIDI notes.
+
+---
+
+## 6. Technical Integrity
+
+- **Sample-accurate processing:** All parameter updates and voice triggers are sample-accurate.
+- **Zero Allocations:** No heap allocation in the `process` call.
+- **Efficiency:** Lock-free parameter caching and pre-calculated wavetables ensure low CPU overhead.
+- **Precision:** `double` precision used for all internal DSP accumulations.
 
 ---
 

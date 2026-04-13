@@ -35,13 +35,15 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(presetPrev);
     addAndMakeVisible(presetNext);
     presetPrev.onClick = [this] {
-        processor.cyclePreset (-1);
+        if (onPresetNavigateRequested)
+            onPresetNavigateRequested(-1);
         refreshPresetLabel();
         if (onPresetNavigate)
             onPresetNavigate();
     };
     presetNext.onClick = [this] {
-        processor.cyclePreset (+1);
+        if (onPresetNavigateRequested)
+            onPresetNavigateRequested(1);
         refreshPresetLabel();
         if (onPresetNavigate)
             onPresetNavigate();
@@ -53,6 +55,16 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
                                                 "Howling Wolves",
                                                 "Settings — audio/MIDI from your DAW host.",
                                                 "OK");
+    };
+
+    addAndMakeVisible(undoBtn);
+    undoBtn.onClick = [this] {
+        processor.getUndoManager().undo();
+    };
+
+    addAndMakeVisible(redoBtn);
+    redoBtn.onClick = [this] {
+        processor.getUndoManager().redo();
     };
 
     cpuLabel.setFont(Theme::fontLabel());
@@ -137,6 +149,8 @@ void TopBar::resized()
 
     cpuLabel.setBounds(r.removeFromRight(72));
     settingsBtn.setBounds(r.removeFromRight(88));
+    redoBtn.setBounds(r.removeFromRight(60));
+    undoBtn.setBounds(r.removeFromRight(60));
 }
 
 } // namespace wolfsden::ui

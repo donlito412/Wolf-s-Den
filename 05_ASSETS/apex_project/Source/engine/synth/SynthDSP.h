@@ -168,6 +168,13 @@ struct Adsr
         stage = Stage::attack;
     }
 
+    /** Retrigger attack without snapping level to zero (reduces clicks on voice steal / legato). */
+    void noteOnFromLevel(double startLevel) noexcept
+    {
+        level = std::clamp(startLevel, 0.0, 1.0);
+        stage = Stage::attack;
+    }
+
     void noteOff() noexcept
     {
         if (stage != Stage::idle)
@@ -256,7 +263,7 @@ struct Lfo
         if (phase >= 1.0)
             phase -= 1.0;
 
-        if (shape == 4 && wrapped)
+        if ((shape == 4 || shape == 5) && wrapped)
             sAndH = (double)xorshift32(noiseState);
 
         switch (shape)
@@ -266,13 +273,17 @@ struct Lfo
             case 1:
                 return 4.0 * std::abs(phase - 0.5) - 1.0;
             case 2:
-                return 2.0 * phase - 1.0;
+                return 2.0 * phase - 1.0; // saw up
             case 3:
                 return phase < 0.5 ? 1.0 : -1.0;
             case 4:
-                return sAndH;
+                return sAndH; // S&H
             case 5:
-                return xorshift32(noiseState);
+                return (double)xorshift32(noiseState); // random per sample
+            case 6:
+                return 1.0 - 2.0 * phase; // saw down
+            case 7:
+                return (double)xorshift32(noiseState); // white noise
             default:
                 return std::sin(twoPi * phase);
         }

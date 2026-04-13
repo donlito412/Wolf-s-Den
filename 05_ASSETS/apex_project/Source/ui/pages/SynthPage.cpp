@@ -7,7 +7,7 @@ namespace wolfsden::ui
 {
 namespace
 {
-static constexpr const char* kOscBtnNames[8] = { "Sine", "Saw", "Square", "Tri", "WT", "Grain", "FM", "Smp" };
+static constexpr const char* kOscBtnNames[9] = { "Sine", "Saw", "Square", "Tri", "WT", "Grain", "FM", "Smp", "Noise" };
 
 void addS(juce::AudioProcessorValueTreeState& apvts,
           const juce::String& id,
@@ -25,6 +25,15 @@ void addC(juce::AudioProcessorValueTreeState& apvts,
 {
     if (apvts.getParameter(id) != nullptr)
         v.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, id, cb));
+}
+
+void addB(juce::AudioProcessorValueTreeState& apvts,
+          const juce::String& id,
+          juce::Button& b,
+          std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>>& v)
+{
+    if (apvts.getParameter(id) != nullptr)
+        v.push_back(std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(apvts, id, b));
 }
 
 void prepCap(juce::Label& L, const juce::String& t, juce::Justification j = juce::Justification::centred)
@@ -128,7 +137,7 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
         addAndMakeVisible(layerTab[(size_t)i]);
     }
 
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 9; ++i)
     {
         oscModeBtn[(size_t)i].setButtonText(kOscBtnNames[(size_t)i]);
         oscModeBtn[(size_t)i].setClickingTogglesState(false);
@@ -149,6 +158,11 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     static const char* kGranLabels[4] = { "Position", "Size", "Density", "Scatter" };
     juce::Slider* granSliders[4] = { &granPos, &granSize, &granDensity, &granScatter };
     juce::Label*  granLabels[4]  = { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter };
+    granFreeze.setClickingTogglesState(true);
+    granFreeze.setColour(juce::ToggleButton::textColourId, Theme::textPrimary());
+    granFreeze.setVisible(false);
+    addAndMakeVisible(granFreeze);
+
     for (int i = 0; i < 4; ++i)
     {
         styleHSlider(*granSliders[(size_t)i]);
@@ -162,6 +176,11 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
         granLabels[(size_t)i]->setVisible(false);
         addAndMakeVisible(*granLabels[(size_t)i]);
     }
+
+    styleHSlider(wavetableMorph);
+    wavetableMorph.setVisible(false);
+    lblWtMorph.setVisible(false);
+    addAndMakeVisible(wavetableMorph);
 
     auto prep = [](juce::Label& L, const juce::String& t, juce::Colour col) {
         L.setText(t, juce::dontSendNotification);
@@ -204,12 +223,21 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     prepCap(lblL1R, "Rate");
     prepCap(lblL1D, "Depth");
     prepCap(lblL1Sh, "Shape");
+    prepCap(lblL1Del, "Dly");
+    prepCap(lblL1Fd, "Fade");
     prepCap(lblL2R, "Rate");
     prepCap(lblL2D, "Depth");
     prepCap(lblL2Sh, "Shape");
+    prepCap(lblL2Del, "Dly");
+    prepCap(lblL2Fd, "Fade");
+    prepCap(lblPoly, "Poly");
+    prepCap(lblGlide, "Glide");
+    prepCap(lblKeyTr, "Key track");
+    prepCap(lblWtMorph, "WT morph");
     for (auto* L : { &lblOct, &lblSemi, &lblFine, &lblCut1, &lblRes1, &lblDrv1, &lblCut2, &lblRes2, &lblDrv2,
                     &lblFilAtk, &lblFilDec, &lblFilSus, &lblFilRel, &lblAmpAtk, &lblAmpDec, &lblAmpSus, &lblAmpRel,
-                    &lblUniV, &lblUniDet, &lblUniSpr, &lblLevel, &lblPan, &lblL1R, &lblL1D, &lblL1Sh, &lblL2R, &lblL2D, &lblL2Sh })
+                    &lblUniV, &lblUniDet, &lblUniSpr, &lblLevel, &lblPan, &lblL1R, &lblL1D, &lblL1Sh, &lblL1Del, &lblL1Fd,
+                    &lblL2R, &lblL2D, &lblL2Sh, &lblL2Del, &lblL2Fd, &lblPoly, &lblGlide, &lblKeyTr, &lblWtMorph })
         addAndMakeVisible(*L);
 
     // OSC tune knobs — Octave / Semitone / Fine
@@ -228,6 +256,8 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(fCut);
     addAndMakeVisible(fRes);
     addAndMakeVisible(fDrive);
+    styleHSlider(filterKeytrack);
+    addAndMakeVisible(filterKeytrack);
 
     // Filter 2 (lblFilter2Header already added via label loop above)
     addAndMakeVisible(filter2Type);
@@ -277,12 +307,43 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     addAndMakeVisible(lfo1Rate);
     addAndMakeVisible(lfo1Depth);
     addAndMakeVisible(lfo1Shape);
+    lfo1Sync.setClickingTogglesState(true);
+    lfo1Sync.setColour(juce::ToggleButton::textColourId, Theme::textPrimary());
+    lfo1Retrigger.setClickingTogglesState(true);
+    lfo1Retrigger.setColour(juce::ToggleButton::textColourId, Theme::textPrimary());
+    addAndMakeVisible(lfo1Sync);
+    addAndMakeVisible(lfo1SyncDiv);
+    styleHSlider(lfo1Delay);
+    styleHSlider(lfo1Fade);
+    addAndMakeVisible(lfo1Delay);
+    addAndMakeVisible(lfo1Fade);
+    addAndMakeVisible(lfo1Retrigger);
 
     styleKnob(lfo2Rate);
     styleKnob(lfo2Depth);
     addAndMakeVisible(lfo2Rate);
     addAndMakeVisible(lfo2Depth);
     addAndMakeVisible(lfo2Shape);
+    lfo2Sync.setClickingTogglesState(true);
+    lfo2Sync.setColour(juce::ToggleButton::textColourId, Theme::textPrimary());
+    lfo2Retrigger.setClickingTogglesState(true);
+    lfo2Retrigger.setColour(juce::ToggleButton::textColourId, Theme::textPrimary());
+    addAndMakeVisible(lfo2Sync);
+    addAndMakeVisible(lfo2SyncDiv);
+    styleHSlider(lfo2Delay);
+    styleHSlider(lfo2Fade);
+    addAndMakeVisible(lfo2Delay);
+    addAndMakeVisible(lfo2Fade);
+    addAndMakeVisible(lfo2Retrigger);
+
+    styleKnob(synthPolyphony);
+    synthPolyphony.setRange(1, 16, 1);
+    synthLegato.setClickingTogglesState(true);
+    synthLegato.setColour(juce::ToggleButton::textColourId, Theme::textPrimary());
+    styleKnob(synthPortamento);
+    addAndMakeVisible(synthPolyphony);
+    addAndMakeVisible(synthLegato);
+    addAndMakeVisible(synthPortamento);
 
     addS(apvts, "filter_adsr_attack", filEnvA, globalSAtt);
     addS(apvts, "filter_adsr_decay", filEnvD, globalSAtt);
@@ -290,11 +351,24 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
     addS(apvts, "filter_adsr_release", filEnvR, globalSAtt);
     addS(apvts, "lfo_rate", lfo1Rate, globalSAtt);
     addS(apvts, "lfo_depth", lfo1Depth, globalSAtt);
-    
-    for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "Random", "S&H" }))
+
+    lfo1Shape.clear();
+    for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "S&H", "Random", "Saw Down", "Noise" }))
         lfo1Shape.addItem(s, lfo1Shape.getNumItems() + 1);
-        
     addC(apvts, "lfo_shape", lfo1Shape, globalCAtt);
+
+    addS(apvts, "synth_polyphony", synthPolyphony, globalSAtt);
+    addB(apvts, "synth_legato", synthLegato, globalBAtt);
+    addS(apvts, "synth_portamento", synthPortamento, globalSAtt);
+
+    addB(apvts, "lfo_sync", lfo1Sync, globalBAtt);
+    lfo1SyncDiv.clear();
+    for (auto& s : juce::StringArray({ "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars", "8 bars" }))
+        lfo1SyncDiv.addItem(s, lfo1SyncDiv.getNumItems() + 1);
+    addC(apvts, "lfo_sync_div", lfo1SyncDiv, globalCAtt);
+    addS(apvts, "lfo_delay", lfo1Delay, globalSAtt);
+    addS(apvts, "lfo_fade", lfo1Fade, globalSAtt);
+    addB(apvts, "lfo_retrigger", lfo1Retrigger, globalBAtt);
 
     for (auto* s : { &filEnvA, &filEnvD, &filEnvS, &filEnvR, &ampA, &ampD, &ampS, &ampR })
         s->onValueChange = [this] {
@@ -339,6 +413,7 @@ void SynthPage::clearLayerBindings()
 {
     layerSAtt.clear();
     layerCAtt.clear();
+    layerBAtt.clear();
 }
 
 void SynthPage::bindLayer(int layerIndex)
@@ -374,6 +449,9 @@ void SynthPage::bindLayer(int layerIndex)
     addS(apvts, layerKey("gran_size"),    granSize,    layerSAtt);
     addS(apvts, layerKey("gran_density"), granDensity, layerSAtt);
     addS(apvts, layerKey("gran_scatter"), granScatter, layerSAtt);
+    addB(apvts, layerKey("gran_freeze"), granFreeze, layerBAtt);
+    addS(apvts, layerKey("wavetable_morph"), wavetableMorph, layerSAtt);
+    addS(apvts, layerKey("filter_keytrack"), filterKeytrack, layerSAtt);
 
     addS(apvts, layerKey("amp_attack"), ampA, layerSAtt);
     addS(apvts, layerKey("amp_decay"), ampD, layerSAtt);
@@ -390,9 +468,17 @@ void SynthPage::bindLayer(int layerIndex)
     addS(apvts, layerKey("lfo2_rate"), lfo2Rate, layerSAtt);
     addS(apvts, layerKey("lfo2_depth"), lfo2Depth, layerSAtt);
     lfo2Shape.clear();
-    for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "Random", "S&H" }))
+    for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "S&H", "Random", "Saw Down", "Noise" }))
         lfo2Shape.addItem(s, lfo2Shape.getNumItems() + 1);
     addC(apvts, layerKey("lfo2_shape"), lfo2Shape, layerCAtt);
+    addB(apvts, layerKey("lfo2_sync"), lfo2Sync, layerBAtt);
+    lfo2SyncDiv.clear();
+    for (auto& s : juce::StringArray({ "1/32", "1/16", "1/8", "1/4", "1/2", "1 bar", "2 bars", "4 bars", "8 bars" }))
+        lfo2SyncDiv.addItem(s, lfo2SyncDiv.getNumItems() + 1);
+    addC(apvts, layerKey("lfo2_sync_div"), lfo2SyncDiv, layerCAtt);
+    addS(apvts, layerKey("lfo2_delay"), lfo2Delay, layerSAtt);
+    addS(apvts, layerKey("lfo2_fade"), lfo2Fade, layerSAtt);
+    addB(apvts, layerKey("lfo2_retrigger"), lfo2Retrigger, layerBAtt);
 }
 
 void SynthPage::setActiveLayer(int layerIndex)
@@ -414,7 +500,9 @@ void SynthPage::syncOscButtons()
     if (auto* c = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter(id)))
         idx = c->getIndex();
 
-    for (int i = 0; i < 8; ++i)
+    lastOscTypeIndex = idx;
+
+    for (int i = 0; i < 9; ++i)
     {
         const bool on = (i == idx);
         oscModeBtn[(size_t)i].setColour(juce::TextButton::buttonOnColourId,
@@ -425,6 +513,10 @@ void SynthPage::syncOscButtons()
 
     const bool isGranular = (idx == 5);
     const bool isSample   = (idx == 7);
+    const bool isWavetable = (idx == 4);
+    granFreeze.setVisible(isGranular);
+    wavetableMorph.setVisible(isWavetable);
+    lblWtMorph.setVisible(isWavetable);
     for (auto* s : { &granPos, &granSize, &granDensity, &granScatter })
         s->setVisible(isGranular);
     for (auto* L : { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter })
@@ -503,7 +595,7 @@ void SynthPage::resized()
     constexpr int kTitleH = 26;
     constexpr int kTabH = 36;
     constexpr int kSecTitle = 18;
-    constexpr int kLfoControlsH = 72;
+    constexpr int kLfoControlsH = 120;
     constexpr int kLfoNoteH = 18;
     constexpr int kFootH = 18;
     constexpr int kCap = 12;
@@ -515,6 +607,18 @@ void SynthPage::resized()
     const int tabBtnW = 46;
     for (int i = 0; i < 4; ++i)
         layerTab[(size_t)i].setBounds(tabRow.removeFromLeft(tabBtnW).reduced(3, 2));
+    tabRow.removeFromLeft(6);
+    {
+        auto vr = tabRow.reduced(0, 4);
+        const int legW = 72;
+        const int polyW = juce::jmax(52, (vr.getWidth() - legW - 8) / 2);
+        auto pz = vr.removeFromLeft(polyW);
+        lblPoly.setBounds(pz.removeFromTop(kCap).reduced(2, 0));
+        synthPolyphony.setBounds(pz.reduced(2, 0));
+        synthLegato.setBounds(vr.removeFromLeft(legW).withHeight(26).withY(vr.getY() + 8));
+        lblGlide.setBounds(vr.removeFromTop(kCap).reduced(2, 0));
+        synthPortamento.setBounds(vr.reduced(2, 0));
+    }
 
     bounds.removeFromBottom(kFootH);
 
@@ -526,28 +630,60 @@ void SynthPage::resized()
     lfo1Area.removeFromTop(18);
     lfo2Area.removeFromTop(18);
     {
-        const int t = lfo1Area.getWidth() / 3;
-        auto a0 = lfo1Area.removeFromLeft(t).reduced(2, 0);
+        auto row1 = lfo1Area.removeFromTop(52 + kCap);
+        const int t = row1.getWidth() / 3;
+        auto a0 = row1.removeFromLeft(t).reduced(2, 0);
         lblL1R.setBounds(a0.removeFromTop(kCap));
         lfo1Rate.setBounds(a0);
-        auto a1 = lfo1Area.removeFromLeft(t).reduced(2, 0);
+        auto a1 = row1.removeFromLeft(t).reduced(2, 0);
         lblL1D.setBounds(a1.removeFromTop(kCap));
         lfo1Depth.setBounds(a1);
-        auto a2 = lfo1Area.reduced(2, 0);
+        auto a2 = row1.reduced(2, 0);
         lblL1Sh.setBounds(a2.removeFromTop(kCap));
         lfo1Shape.setBounds(a2);
+        auto row2 = lfo1Area;
+        const int gap = 4;
+        const int syncW = 44;
+        const int rtrgW = 44;
+        const int mid = juce::jmax(56, row2.getWidth() - syncW - rtrgW - gap * 4);
+        const int du = mid / 3;
+        lfo1Sync.setBounds(row2.getX(), row2.getY() + 2, syncW, 22);
+        lfo1SyncDiv.setBounds(row2.getX() + syncW + gap, row2.getY(), du, 24);
+        auto dCol = row2.withX(row2.getX() + syncW + gap + du + gap).withWidth(du);
+        lblL1Del.setBounds(dCol.removeFromTop(kCap));
+        lfo1Delay.setBounds(dCol);
+        auto fCol = row2.withX(row2.getX() + syncW + gap + du + gap + du + gap).withWidth(du);
+        lblL1Fd.setBounds(fCol.removeFromTop(kCap));
+        lfo1Fade.setBounds(fCol);
+        lfo1Retrigger.setBounds(row2.getRight() - rtrgW, row2.getY() + 2, rtrgW, 22);
     }
     {
-        const int t = lfo2Area.getWidth() / 3;
-        auto b0 = lfo2Area.removeFromLeft(t).reduced(2, 0);
+        auto row1 = lfo2Area.removeFromTop(52 + kCap);
+        const int t = row1.getWidth() / 3;
+        auto b0 = row1.removeFromLeft(t).reduced(2, 0);
         lblL2R.setBounds(b0.removeFromTop(kCap));
         lfo2Rate.setBounds(b0);
-        auto b1 = lfo2Area.removeFromLeft(t).reduced(2, 0);
+        auto b1 = row1.removeFromLeft(t).reduced(2, 0);
         lblL2D.setBounds(b1.removeFromTop(kCap));
         lfo2Depth.setBounds(b1);
-        auto b2 = lfo2Area.reduced(2, 0);
+        auto b2 = row1.reduced(2, 0);
         lblL2Sh.setBounds(b2.removeFromTop(kCap));
         lfo2Shape.setBounds(b2);
+        auto row2 = lfo2Area;
+        const int gap = 4;
+        const int syncW = 44;
+        const int rtrgW = 44;
+        const int mid = juce::jmax(56, row2.getWidth() - syncW - rtrgW - gap * 4);
+        const int du = mid / 3;
+        lfo2Sync.setBounds(row2.getX(), row2.getY() + 2, syncW, 22);
+        lfo2SyncDiv.setBounds(row2.getX() + syncW + gap, row2.getY(), du, 24);
+        auto dCol = row2.withX(row2.getX() + syncW + gap + du + gap).withWidth(du);
+        lblL2Del.setBounds(dCol.removeFromTop(kCap));
+        lfo2Delay.setBounds(dCol);
+        auto fCol = row2.withX(row2.getX() + syncW + gap + du + gap + du + gap).withWidth(du);
+        lblL2Fd.setBounds(fCol.removeFromTop(kCap));
+        lfo2Fade.setBounds(fCol);
+        lfo2Retrigger.setBounds(row2.getRight() - rtrgW, row2.getY() + 2, rtrgW, 22);
     }
 
     const int totalW = bounds.getWidth();
@@ -579,26 +715,39 @@ void SynthPage::resized()
     const int x0 = o.getX();
     const int cw = o.getWidth();
     const int btnH = 26;
-    const int btnW = juce::jmax(1, cw / 4);
-    for (int row = 0; row < 2; ++row)
-        for (int c = 0; c < 4; ++c)
-            oscModeBtn[(size_t)(row * 4 + c)]
+    const int btnW = juce::jmax(1, cw / 3);
+    for (int row = 0; row < 3; ++row)
+        for (int c = 0; c < 3; ++c)
+            oscModeBtn[(size_t)(row * 3 + c)]
                 .setBounds(x0 + c * btnW + 1, y + row * btnH, btnW - 2, btnH - 2);
-    y += btnH * 2 + 8;
+    y += btnH * 3 + 8;
 
     // Waveform preview (leave room below for granular block, optional sample row, and tune knobs + captions)
     const bool isGranular = granPos.isVisible();
-    const int granControlsH = isGranular ? (4 * (15 + 20 + 3) + 4) : 0; // label + slider + gap per row
+    const bool isWavetable = (lastOscTypeIndex == 4);
+    const int freezeRow = isGranular ? 26 : 0;
+    const int granControlsH = isGranular ? (freezeRow + 4 * (15 + 20 + 3) + 4) : 0; // label + slider + gap per row
     const int sampleH = loadSampleBtn.isVisible() ? 34 : 0;
-    const int tuneBlock = granControlsH + sampleH + kCap + 58 + 8;
+    const int wtH = isWavetable ? (kCap + 24 + 6) : 0;
+    const int tuneBlock = granControlsH + sampleH + wtH + kCap + 58 + 8;
     const int waveH = juce::jlimit(40, 80, juce::jmax(40, o.getBottom() - y - tuneBlock));
     wavePreview.setBounds(x0, y, cw, waveH);
     y += wavePreview.getHeight() + 6;
+
+    if (isWavetable)
+    {
+        lblWtMorph.setBounds(x0, y, cw, kCap);
+        y += kCap;
+        wavetableMorph.setBounds(x0, y, cw, 22);
+        y += 28;
+    }
 
     // Granular controls — only visible in Granular mode
     zoneGranular = juce::Rectangle<int>(x0, y, cw, granControlsH);
     if (isGranular)
     {
+        granFreeze.setBounds(x0, y, 88, 22);
+        y += freezeRow;
         juce::Slider* gs[4] = { &granPos, &granSize, &granDensity, &granScatter };
         juce::Label*  gl[4] = { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter };
         for (int i = 0; i < 4; ++i)
@@ -654,6 +803,10 @@ void SynthPage::resized()
         fDrive.setBounds(fx0 + 2 * fk + 4, y + kCap, fk, fh);
         y += kCap + fh + 6;
     }
+    lblKeyTr.setBounds(fx0, y, fcw, kCap);
+    y += kCap;
+    filterKeytrack.setBounds(fx0, y, fcw, 20);
+    y += 24;
 
     // Filter 2 header
     lblFilter2Header.setBounds(fx0, y, fcw, 18);
