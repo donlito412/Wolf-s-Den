@@ -468,5 +468,5 @@ Details:
   TASK_012 Composition Library Fix:
     - Seeded progressions table in TheoryEngine.cpp: Added a 96-progression seed block (12 genres x 8 progressions) with an independent count-guard. This ensures that even existing databases (which already had chords/scales) get the new progression library seeded correctly.
     - Fixed early-exit guard in seedDatabase() that was blocking progressions from ever being added to pre-existing databases.
-Next Step: User verifies Composition Page now has 12 genres of playable progressions and Arp is click-free.
+Next Step: User verifies Composition Page now has 12 genres of playable progressions and Arp is click-free. Version bumped to v2.5.
 Status: DONE
