@@ -361,3 +361,96 @@ Details:
 
 Next Step: User builds (cmake --build build --config Release in apex_project directory) and tests in DAW.
 Status: DONE
+
+---
+
+[2026-04-18]
+
+Agent: Jon (User) — Logic Pro DAW Testing
+Task: Phase 1 real-world validation in Logic Pro
+Output: Findings logged below. No code changes this session.
+Details:
+
+  CONFIRMED WORKING:
+  - Plugin loads in Logic Pro without crash
+  - Raw audio output — clean, no artifacts
+  - Chord Mode on/off toggle — functional
+  - Composition page UI renders correctly
+
+  BUGS CONFIRMED (Phase 2 targets):
+
+  BUG_P2_001 — CRITICAL
+  Composition page genre selection does nothing.
+  Selecting a genre (e.g. Hip-Hop, Jazz) produces no chord progressions, no audition pads populated, no sound.
+  The genre pill UI exists but is not wired to any real progression data.
+  Root cause: no actual genre→progression library exists in the database; chord_sets seeded are generic, not genre-mapped.
+
+  BUG_P2_002 — HIGH
+  Arpeggiator corrupts preset sound at faster BPM settings.
+  At higher arp rates the voice state breaks — sound changes character, drifts from the loaded preset's timbre.
+  Free-tempo arp at slow settings appears functional.
+  Root cause likely: voice accumulation / note-off timing failure under rapid arp firing causing hung voices that layer over the active sound.
+
+  BUG_P2_003 — HIGH
+  CPU usage 45–55% on Apple M1 under normal playing conditions.
+  Phase 1 target was <20%. This is a hard fail.
+  No profiling done yet — optimization task required.
+
+  NOT TESTED / DEFERRED TO PHASE 2:
+  - FL Studio, Ableton Live compatibility
+  - Windows build
+  - 1-hour crash / memory leak test
+  - Wavetable morph file I/O
+  - Granular scatter/freeze depth
+  - Sample playback depth
+
+Next Step: Phase 2 begins. See TASK_011–014 for bug fix and feature work.
+Status: PHASE 1 COMPLETE — PHASE 2 OPEN
+
+---
+
+[2026-04-18]
+
+Agent: Cursor
+Task: TASK_011 - Fix Arpeggiator Fast Rate Sound Corruption
+Output: Modified Source/engine/MidiPipeline.cpp
+Details:
+  - Fixed overlapping note envelopes: Voices are now cleared when the arp transitions from off to on via `allNotesOffOutput(out, 0);`
+  - Fixed fast rate timing collision: Replaced hard 64-sample gate floor with a dynamic cap (`maxGate = juce::jmax(1.0, samplesPerArpStep * 0.9)`).
+  - Fixed BPM change artifact: Created a `blockStepLen` snapshot at block start to prevent rapid mid-block firing.
+  - Fixed parameter drift: Consolidated rate parameter reading directly via `arpRateParam->getIndex()`, removing the raw atomic fallback.
+Next Step: Move on to TASK_012 (Composition Page Progression Library).
+Status: DONE
+
+---
+
+[2026-04-18]
+
+Agent: Cursor
+Task: TASK_012 - Build Genre Progression Library
+Output: Database schema updated, new progressions inserted, UI connected to progressions data.
+Details:
+  - Added new `progressions` table via `createSchema()` and migration script.
+  - Embedded SQL in `seedDatabase()` to insert extensive genre progressions: Pop, Rock, Jazz, Lo-Fi, R&B, Electronic, Cinematic, Trap, Blues.
+  - Wired `TheoryEngine` with new `ProgressionListing` struct and `getProgressionListings(genre)` query.
+  - Re-mapped `CompositionPage` to iterate over fetched genre progressions, updating audition grids to pull `chord_id` lists mapped back to corresponding `intervals`.
+Next Step: Move to TASK_013 or user-driven test block.
+Status: DONE
+
+---
+
+[2026-04-18]
+
+Agent: Antigravity
+Task: TASK_013 - CPU Optimization (BUG_P2_003)
+Output: Modified Source/engine/synth/VoiceLayer.{h,cpp}, Source/engine/FxEngine.cpp, Source/ui/chrome/TopBar.cpp, Source/engine/MidiPipeline.h, Source/engine/TheoryEngine.cpp. Version bumped to v2.4.
+Details:
+  RC1 — computeTargetHz() fine-tune: Removed std::pow(2, fineCents/1200) from per-sample computeTargetHz(). Pre-baked as cachedFineTuneFactor at noteOn/noteOnSteal/noteOnLegato. Saves ~2.8M std::pow calls/sec at full polyphony.
+  RC2 — Unison pitch factors: Replaced 4× per-sample std::pow unison pitch calculations with uniPitchFactor[] array. Cache rebuilt only when nv or detune changes. Saves up to 512 std::pow calls/sample at 8-voice unison.
+  RC3 — Filter keytrack: Replaced 2× per-4-sample std::pow keytrack frequency factor with cachedKtFactor, recomputed only when kt parameter changes. Saves ~700K std::pow calls/sec.
+  RC4 — FxEngine Compressor/Gate exp(): Hoisted std::exp atk/rel computations out of the per-sample loop into block-level scope. Both effects now use continue to bypass the generic per-sample switch, running their own inner loops.
+  RC5 — FxEngine HP/LP std::pow: Hoisted std::pow(1000, p0) frequency computation before the sample loop for HighPass and LowPass. Both now run their own inner loop with continue.
+  RC6 — fastSin() LFO: Replaced std::sin() in all 5 LFO FX (Chorus, Flanger, Phaser, Tremolo, AutoPan) with Bhaskara I polynomial approximation (fastSin). <0.2% error, no transcendental cost.
+  Cleanup: Removed unused private field lastChordOn (MidiPipeline.h) and unused constant kMidi0Hz (TheoryEngine.cpp).
+Next Step: User loads v2.4 in Logic Pro and measures CPU at 16-voice, 4-layer, full FX.
+Status: DONE

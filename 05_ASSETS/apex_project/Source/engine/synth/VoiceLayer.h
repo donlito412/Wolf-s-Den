@@ -198,6 +198,19 @@ private:
     static constexpr int kFilterUpdateInterval = 4;
     int filterUpdateTick_ = 0;
 
+    // RC1: pre-baked fine-tune factor — std::pow(2, fineCents/1200) computed once per noteOn/change
+    double cachedFineTuneFactor = 1.0;
+    double lastFineCents = -99999.0;
+
+    // RC2: pre-baked unison pitch factors — recomputed only when nv or detune changes
+    std::array<double, 8> uniPitchFactor {};
+    int    lastNv        = 0;
+    double lastUniDetune = -1.0;
+
+    // RC3: pre-baked keytrack factor — std::pow(2, ktSemi/12) computed once per noteOn/param change
+    double cachedKtFactor = 1.0;
+    float  lastKt         = -99999.f;
+
     float lastAmpEnvOut = 0.f;
     float lastFiltEnvOut = 0.f;
 

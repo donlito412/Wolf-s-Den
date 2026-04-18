@@ -241,7 +241,7 @@ private:
 
     /** PPQ phase snap only on arp enable — avoids fighting per-sample advance (MIDI zipper/static). */
     bool lastProcessArpOn = false;
-    bool lastChordOn = false;
+
 
     /** End-of-last-block PPQ (predicted) for transport jump detection when sync is on. */
     double lastArpSyncPpq = 0.0;

@@ -132,18 +132,19 @@ void VoiceLayer::reset() noexcept
 static double computeTargetHz(int midiNote,
                               int layerIndex,
                               const ParamPointers& p,
-                              float modMatrixPitchSemi) noexcept
+                              float modMatrixPitchSemi,
+                              double fineTuneFactor) noexcept
 {
     const double masterPitchSemi = (double)readFloatAP(p.masterPitch, 0.f);
     const int coarse = readIntFromNorm(p.layerCoarse[layerIndex], -24, 24, 0);
     const int octave = readIntFromNorm(p.layerOctave[layerIndex], -3, 3, 0);
-    const double fineCents = (double)readFloatAP(p.layerFine[layerIndex], 0.f);
     double hz = dsp::midiNoteToHz(midiNote + coarse + octave * 12 + (int)std::lround(masterPitchSemi));
-    hz *= std::pow(2.0, fineCents / 1200.0);
+    hz *= fineTuneFactor;  // RC1: pre-baked, no std::pow per sample
     if (modMatrixPitchSemi != 0.f)
-        hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);
+        hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);  // mod matrix changes per block
     return hz;
 }
+
 
 void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept
 {
@@ -156,9 +157,14 @@ void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const Para
     uniSaw.fill(0.0);
     uniSq.fill(0.0);
     uniTri.fill(0.0);
+    // RC1: bake fine-tune factor at noteOn
+    const double fineCents = (double)readFloatAP(p.layerFine[layerIndex], 0.f);
+    cachedFineTuneFactor = std::pow(2.0, fineCents / 1200.0);
+    lastFineCents = fineCents;
+
     ampAdsr.noteOn();
     filtAdsr.noteOn();
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f, cachedFineTuneFactor);
     glideHz = glideTargetHz;
 
     samplePlayer.syncPendingToCache();
@@ -181,7 +187,7 @@ void VoiceLayer::noteOnLegato(int midiNote, float velocity, int layerIndex, cons
 {
     currentNote = midiNote;
     currentVel = velocity;
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f, cachedFineTuneFactor);
     samplePlayer.syncPendingToCache();
     if (samplePlayer.hasReadableSource())
     {
@@ -209,10 +215,18 @@ void VoiceLayer::noteOnSteal(int midiNote,
     currentNote = midiNote;
     currentVel = velocity;
     filterUpdateTick_ = kFilterUpdateInterval; // force immediate filter recalc on next render
+    // RC1: bake fine-tune factor at noteOnSteal (matches noteOn)
+    const double fineCentsS = (double)readFloatAP(p.layerFine[layerIndex], 0.f);
+    if (fineCentsS != lastFineCents)
+    {
+        cachedFineTuneFactor = std::pow(2.0, fineCentsS / 1200.0);
+        lastFineCents = fineCentsS;
+    }
+
     ampAdsr.noteOnFromLevel(ampEnvLevel * 0.92);
     filtAdsr.noteOnFromLevel(filtEnvLevel * 0.92);
 
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f, cachedFineTuneFactor);
     glideHz = glideTargetHz;
     samplePlayer.syncPendingToCache();
     if (samplePlayer.hasReadableSource())
@@ -306,6 +320,15 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
         return (v - 0.5 * (double)(nVoices - 1)) * (span / (double)denom);
     };
 
+    // RC2: rebuild unison pitch factor cache only when nv or detune changes
+    if (nv != lastNv || detMax != lastUniDetune)
+    {
+        for (int v = 0; v < nv; ++v)
+            uniPitchFactor[(size_t)v] = std::pow(2.0, centOffset(v, nv) / 1200.0);
+        lastNv        = nv;
+        lastUniDetune = detMax;
+    }
+
     const double inc = hz / sr;
     const double fmIndex = (double)readFloatAP(p.layerRes[layerIdx], 1.f) * 0.35;
     const float morphN = readFloatAP(p.layerWtMorph[layerIdx], 0.f);
@@ -323,8 +346,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             double acc = 0;
             for (int v = 0; v < nv; ++v)
             {
-                const double cents = centOffset(v, nv);
-                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double hzv = hz * uniPitchFactor[(size_t)v];  // RC2: no std::pow
                 const double incv = hzv / sr;
                 uniSin[(size_t)v] += incv;
                 if (uniSin[(size_t)v] >= 1.0)
@@ -344,8 +366,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             double acc = 0;
             for (int v = 0; v < nv; ++v)
             {
-                const double cents = centOffset(v, nv);
-                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double hzv = hz * uniPitchFactor[(size_t)v];  // RC2
                 const double incv = hzv / sr;
                 uniSaw[(size_t)v] += incv;
                 if (uniSaw[(size_t)v] >= 1.0)
@@ -365,8 +386,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             double acc = 0;
             for (int v = 0; v < nv; ++v)
             {
-                const double cents = centOffset(v, nv);
-                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double hzv = hz * uniPitchFactor[(size_t)v];  // RC2
                 const double incv = hzv / sr;
                 uniSq[(size_t)v] += incv;
                 if (uniSq[(size_t)v] >= 1.0)
@@ -386,8 +406,7 @@ double VoiceLayer::processOscillator(int oscType, double hz, int layerIdx, const
             double acc = 0;
             for (int v = 0; v < nv; ++v)
             {
-                const double cents = centOffset(v, nv);
-                const double hzv = hz * std::pow(2.0, cents / 1200.0);
+                const double hzv = hz * uniPitchFactor[(size_t)v];  // RC2
                 const double incv = hzv / sr;
                 uniSq[(size_t)v] += incv;
                 if (uniSq[(size_t)v] >= 1.0)
@@ -660,7 +679,7 @@ void VoiceLayer::renderAdd(double& outL,
 
     updateAdsrTargets(layerIndex, p);
 
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, modMatrixPitchSemi);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, modMatrixPitchSemi, cachedFineTuneFactor);
     const float portSec = p.synthPortamento != nullptr
                               ? readFloatAP(p.synthPortamento, 0.f)
                               : 0.f;
@@ -723,9 +742,16 @@ void VoiceLayer::renderAdd(double& outL,
     smoothedCut2 += (baseCut2 - smoothedCut2) * 0.005;
 
     const float kt = readFloatAP(p.layerKeytrack[layerIndex], 0.f);
-    const double ktSemi = (double)(midiNote - 60) * (double)kt * 0.12;
-    const double cut1 = smoothedCut1 * std::pow(2.0, ktSemi / 12.0);
-    const double cut2 = smoothedCut2 * std::pow(2.0, ktSemi / 12.0);
+    // RC3: recompute keytrack factor only when kt parameter changes
+    if (kt != lastKt)
+    {
+        const double ktSemi = (double)(midiNote - 60) * (double)kt * 0.12;
+        cachedKtFactor = std::pow(2.0, ktSemi / 12.0);
+        lastKt = kt;
+    }
+    const double cut1 = smoothedCut1 * cachedKtFactor;
+    const double cut2 = smoothedCut2 * cachedKtFactor;
+
 
     const double res1 = (double)readFloatAP(p.layerRes[layerIndex], 1.f) + (double)modMatrixResAdd;
     const double res2 = (double)readFloatAP(p.layerF2res[layerIndex], 1.f)

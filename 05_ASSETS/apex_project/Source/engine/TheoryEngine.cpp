@@ -51,7 +51,7 @@ std::string buildIntervalJsonImpl (const std::vector<int>& iv)
 }
 
 // Frequency of MIDI note 0 (C-1) in Hz
-constexpr double kMidi0Hz = 8.1757989156;
+
 
 /** Portable 32-bit popcount (C++17). */
 inline int popcount32 (unsigned x) noexcept
@@ -762,6 +762,17 @@ void TheoryEngine::createSchema()
             state_blob      BLOB
         );
 
+        CREATE TABLE IF NOT EXISTS progressions (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            name            TEXT NOT NULL,
+            genre           TEXT NOT NULL,
+            mood            TEXT,
+            energy          INTEGER DEFAULT 2,
+            root_key        INTEGER DEFAULT 0,
+            chord_sequence  TEXT NOT NULL,  -- JSON array of chord_definition_id values
+            created_at      TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chord_set_entries_set ON chord_set_entries(chord_set_id);
         CREATE INDEX IF NOT EXISTS idx_chord_sets_genre      ON chord_sets(genre);
         CREATE INDEX IF NOT EXISTS idx_chord_sets_mood       ON chord_sets(mood);
@@ -1160,6 +1171,40 @@ std::vector<ChordSetEntry> TheoryEngine::getChordSetEntries (int setId) const
         out.push_back (e);
     }
     sqlite3_finalize (stmt);
+    return out;
+}
+
+std::vector<ProgressionListing> TheoryEngine::getProgressionListings(const std::string& genre) const
+{
+    std::vector<ProgressionListing> out;
+    if (!db) return out;
+
+    std::string sql = "SELECT id, name, genre, IFNULL(mood,''), energy, root_key, chord_sequence "
+                      "FROM progressions";
+    if (!genre.empty() && genre != "All")
+        sql += " WHERE genre = ?";
+    sql += " ORDER BY genre ASC, name ASC;";
+
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+        return out;
+
+    if (!genre.empty() && genre != "All")
+        sqlite3_bind_text(stmt, 1, genre.c_str(), -1, SQLITE_TRANSIENT);
+
+    while (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        ProgressionListing p;
+        p.id            = sqlite3_column_int(stmt, 0);
+        p.name          = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        p.genre         = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        p.mood          = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        p.energy        = sqlite3_column_int(stmt, 4);
+        p.rootKey       = sqlite3_column_int(stmt, 5);
+        p.chordSequence = parseIntervalJson(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6)));
+        out.push_back(std::move(p));
+    }
+    sqlite3_finalize(stmt);
     return out;
 }
 
