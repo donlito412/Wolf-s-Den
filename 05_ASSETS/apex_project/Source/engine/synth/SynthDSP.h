@@ -71,7 +71,7 @@ struct Biquad
         z1 = b1 * x - a1 * y + z2;
         z2 = b2 * x - a2 * y;
         // Protect against NaN/Inf propagation and runaway state
-        if (!(std::isfinite(z1) && std::isfinite(z2)))
+        if (!(z1 > -1e9 && z1 < 1e9 && z2 > -1e9 && z2 < 1e9))
         {
             z1 = z2 = 0;
             return 0;

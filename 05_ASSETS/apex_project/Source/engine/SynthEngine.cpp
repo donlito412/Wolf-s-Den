@@ -9,17 +9,11 @@ namespace wolfsden
 {
 namespace
 {
-inline float readFloatAP(std::atomic<float>* ap, juce::AudioParameterFloat* pf, float defV) noexcept
+inline float readFloatAP(std::atomic<float>* ap, float defV) noexcept
 {
     if (!ap)
         return defV;
-    const float v = ap->load(std::memory_order_relaxed);
-    if (pf != nullptr)
-    {
-        const auto r = pf->getNormalisableRange();
-        return juce::jlimit(r.start, r.end, v);
-    }
-    return v;
+    return ap->load(std::memory_order_relaxed);
 }
 
 inline int readChoiceIndex(std::atomic<float>* ap, int numItems, int defIdx) noexcept
@@ -98,16 +92,6 @@ void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvt
     ptrs.lfoFade = apvts.getRawParameterValue("lfo_fade");
     ptrs.lfoRetrigger = apvts.getRawParameterValue("lfo_retrigger");
 
-    ptrs.masterPitchF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("master_pitch"));
-    ptrs.masterVolF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("master_volume"));
-    ptrs.filterAdsrAF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("filter_adsr_attack"));
-    ptrs.filterAdsrDF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("filter_adsr_decay"));
-    ptrs.filterAdsrSF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("filter_adsr_sustain"));
-    ptrs.filterAdsrRF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("filter_adsr_release"));
-    ptrs.lfoRateF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("lfo_rate"));
-    ptrs.lfoDepthF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("lfo_depth"));
-    ptrs.lfoDelayF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("lfo_delay"));
-    ptrs.lfoFadeF = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("lfo_fade"));
 
     for (int i = 0; i < kNumLayers; ++i)
     {
@@ -150,31 +134,6 @@ void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvt
         ptrs.layerUnisonDetune[(size_t)i] = apvts.getRawParameterValue(p + "unison_detune");
         ptrs.layerUnisonSpread[(size_t)i] = apvts.getRawParameterValue(p + "unison_spread");
 
-        ptrs.layerVolF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "volume"));
-        ptrs.layerPanF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "pan"));
-        ptrs.layerFineF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "tune_fine"));
-        ptrs.layerCutoffF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter_cutoff"));
-        ptrs.layerResF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter_resonance"));
-        ptrs.layerFilterDriveF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter_drive"));
-        ptrs.layerF2cutoffF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter2_cutoff"));
-        ptrs.layerF2resF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter2_resonance"));
-        ptrs.layerF2driveF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter2_drive"));
-        ptrs.layerGranPosF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "gran_pos"));
-        ptrs.layerGranSizeF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "gran_size"));
-        ptrs.layerGranDensityF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "gran_density"));
-        ptrs.layerGranScatterF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "gran_scatter"));
-        ptrs.layerWtMorphF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "wavetable_morph"));
-        ptrs.layerKeytrackF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "filter_keytrack"));
-        ptrs.layerLfo2RateF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "lfo2_rate"));
-        ptrs.layerLfo2DepthF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "lfo2_depth"));
-        ptrs.layerLfo2DelayF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "lfo2_delay"));
-        ptrs.layerLfo2FadeF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "lfo2_fade"));
-        ptrs.layerUnisonDetuneF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "unison_detune"));
-        ptrs.layerUnisonSpreadF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "unison_spread"));
-        ptrs.layerAAF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "amp_attack"));
-        ptrs.layerADF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "amp_decay"));
-        ptrs.layerASF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "amp_sustain"));
-        ptrs.layerARF[(size_t)i] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(p + "amp_release"));
     }
     pointersBound = true;
 }
@@ -438,8 +397,8 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                 if (readBoolNorm(ptrs.lfoRetrigger, false))
                 {
                     globalLfo.phase = 0;
-                    globalLfoDelayRem = (double)readFloatAP(ptrs.lfoDelay, ptrs.lfoDelayF, 0.f) * sampleRate;
-                    globalLfoFadeTotal = (double)readFloatAP(ptrs.lfoFade, ptrs.lfoFadeF, 0.f) * sampleRate;
+                    globalLfoDelayRem = (double)readFloatAP(ptrs.lfoDelay, 0.f) * sampleRate;
+                    globalLfoFadeTotal = (double)readFloatAP(ptrs.lfoFade, 0.f) * sampleRate;
                     globalLfoFadeProg = 0;
                 }
 
@@ -500,8 +459,8 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
 
         if (!globalLfoInitialised)
         {
-            globalLfoDelayRem = (double)readFloatAP(ptrs.lfoDelay, ptrs.lfoDelayF, 0.f) * sampleRate;
-            globalLfoFadeTotal = (double)readFloatAP(ptrs.lfoFade, ptrs.lfoFadeF, 0.f) * sampleRate;
+            globalLfoDelayRem = (double)readFloatAP(ptrs.lfoDelay, 0.f) * sampleRate;
+            globalLfoFadeTotal = (double)readFloatAP(ptrs.lfoFade, 0.f) * sampleRate;
             globalLfoFadeProg = 0;
             globalLfoInitialised = true;
         }
@@ -550,11 +509,11 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
 
         const int lfoShapeN = readChoiceIndex(ptrs.lfoShape, 8, 0);
         globalLfo.setShape(juce::jlimit(0, 7, lfoShapeN));
-        const float baseLfoDepth = readFloatAP(ptrs.lfoDepth, ptrs.lfoDepthF, 0.f);
+        const float baseLfoDepth = readFloatAP(ptrs.lfoDepth, 0.f);
         const float effLfoDepth = juce::jlimit(0.01f, 1.f, baseLfoDepth + lfoDepthAdd);
         const float depthRatio = juce::jlimit(0.25f, 4.f, effLfoDepth / juce::jmax(0.01f, baseLfoDepth));
 
-        double lfoHz = (double)readFloatAP(ptrs.lfoRate, ptrs.lfoRateF, 2.f) * (double)lfoRateMul;
+        double lfoHz = (double)readFloatAP(ptrs.lfoRate, 2.f) * (double)lfoRateMul;
         if (readBoolNorm(ptrs.lfoSync, false) && hostBpm > 20.0)
         {
             const int divi = readChoiceIndex(ptrs.lfoSyncDiv, 9, 4);
@@ -604,7 +563,7 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                                               layerPanAdd[(size_t)L]);
         }
 
-        const float master = readFloatAP(ptrs.masterVol, ptrs.masterVolF, 0.8f);
+        const float master = readFloatAP(ptrs.masterVol, 0.8f);
         const double masterScaled = (double)master * (double)masterMul;
         float* layerOut[4][2] = { { out0, out1 }, { out2, out3 }, { out4, out5 }, { out6, out7 } };
         for (int L = 0; L < 4; ++L)

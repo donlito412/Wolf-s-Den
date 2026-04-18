@@ -35,16 +35,6 @@ struct ParamPointers
     std::atomic<float>* synthLegato = nullptr;
     std::atomic<float>* synthPortamento = nullptr;
 
-    juce::AudioParameterFloat* masterPitchF = nullptr;
-    juce::AudioParameterFloat* masterVolF = nullptr;
-    juce::AudioParameterFloat* filterAdsrAF = nullptr;
-    juce::AudioParameterFloat* filterAdsrDF = nullptr;
-    juce::AudioParameterFloat* filterAdsrSF = nullptr;
-    juce::AudioParameterFloat* filterAdsrRF = nullptr;
-    juce::AudioParameterFloat* lfoRateF = nullptr;
-    juce::AudioParameterFloat* lfoDepthF = nullptr;
-    juce::AudioParameterFloat* lfoDelayF = nullptr;
-    juce::AudioParameterFloat* lfoFadeF = nullptr;
 
     std::atomic<float>* layerVol[4] {};
     std::atomic<float>* layerPan[4] {};
@@ -84,31 +74,6 @@ struct ParamPointers
     std::atomic<float>* layerAS[4] {};
     std::atomic<float>* layerAR[4] {};
 
-    juce::AudioParameterFloat* layerVolF[4] {};
-    juce::AudioParameterFloat* layerPanF[4] {};
-    juce::AudioParameterFloat* layerFineF[4] {};
-    juce::AudioParameterFloat* layerCutoffF[4] {};
-    juce::AudioParameterFloat* layerResF[4] {};
-    juce::AudioParameterFloat* layerFilterDriveF[4] {};
-    juce::AudioParameterFloat* layerF2cutoffF[4] {};
-    juce::AudioParameterFloat* layerF2resF[4] {};
-    juce::AudioParameterFloat* layerF2driveF[4] {};
-    juce::AudioParameterFloat* layerGranPosF[4] {};
-    juce::AudioParameterFloat* layerGranSizeF[4] {};
-    juce::AudioParameterFloat* layerGranDensityF[4] {};
-    juce::AudioParameterFloat* layerGranScatterF[4] {};
-    juce::AudioParameterFloat* layerWtMorphF[4] {};
-    juce::AudioParameterFloat* layerKeytrackF[4] {};
-    juce::AudioParameterFloat* layerLfo2RateF[4] {};
-    juce::AudioParameterFloat* layerLfo2DepthF[4] {};
-    juce::AudioParameterFloat* layerLfo2DelayF[4] {};
-    juce::AudioParameterFloat* layerLfo2FadeF[4] {};
-    juce::AudioParameterFloat* layerUnisonDetuneF[4] {};
-    juce::AudioParameterFloat* layerUnisonSpreadF[4] {};
-    juce::AudioParameterFloat* layerAAF[4] {};
-    juce::AudioParameterFloat* layerADF[4] {};
-    juce::AudioParameterFloat* layerASF[4] {};
-    juce::AudioParameterFloat* layerARF[4] {};
 };
 
 class VoiceLayer
