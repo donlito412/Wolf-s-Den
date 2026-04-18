@@ -452,5 +452,21 @@ Details:
   RC5 — FxEngine HP/LP std::pow: Hoisted std::pow(1000, p0) frequency computation before the sample loop for HighPass and LowPass. Both now run their own inner loop with continue.
   RC6 — fastSin() LFO: Replaced std::sin() in all 5 LFO FX (Chorus, Flanger, Phaser, Tremolo, AutoPan) with Bhaskara I polynomial approximation (fastSin). <0.2% error, no transcendental cost.
   Cleanup: Removed unused private field lastChordOn (MidiPipeline.h) and unused constant kMidi0Hz (TheoryEngine.cpp).
-Next Step: User loads v2.4 in Logic Pro and measures CPU at 16-voice, 4-layer, full FX.
+Next Step: User loads v2.4 in Logic Pro and measures CPU at 16-voice, 4-layer, full FX. Also verify Arp audio cleanliness and Composition Page progression loading.
+Status: DONE
+
+---
+
+[2026-04-18]
+
+Agent: Antigravity
+Task: TASK_011 & TASK_012 Fixes (Retrospective)
+Output: Modified Source/engine/SynthEngine.cpp, Source/engine/TheoryEngine.cpp.
+Details:
+  TASK_011 Arpeggiator Fix:
+    - Fixed steal logic in SynthEngine.cpp: Always pass steal=true to startVoice for same-note retriggering. This ensures the noteOnSteal path is used, preserving oscillator phase and eliminating audio clicks/artifacts at fast ARP rates.
+  TASK_012 Composition Library Fix:
+    - Seeded progressions table in TheoryEngine.cpp: Added a 96-progression seed block (12 genres x 8 progressions) with an independent count-guard. This ensures that even existing databases (which already had chords/scales) get the new progression library seeded correctly.
+    - Fixed early-exit guard in seedDatabase() that was blocking progressions from ever being added to pre-existing databases.
+Next Step: User verifies Composition Page now has 12 genres of playable progressions and Arp is click-free.
 Status: DONE

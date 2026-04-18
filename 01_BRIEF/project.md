@@ -30,11 +30,37 @@ Wolf's Den is a multi-layer hybrid synthesizer with an embedded music theory eng
 - Plugin size under 2GB (base install without sample libraries)
 - Stable: zero crashes in 4-hour session tests
 
-# CURRENT STATUS
-Active development — core plugin building in JUCE (synth, MIDI pipeline, modulation, FX rack). All shipped features are held to **release quality**: no “placeholder” behavior marketed as finished product; names match what the DSP actually does.
+# PHASE 1 — COMPLETE [2026-04-18]
+Tasks 001–010 executed. Full JUCE plugin built: synthesis engine, theory engine, MIDI pipeline, modulation system, FX rack, full custom UI, preset system (41 factory instruments), SQLite database. Plugin loads and produces audio in Logic Pro. Phase 1 is closed — no further work under Tasks 001–010.
+
+# CURRENT STATUS — PHASE 2
+Real-world DAW testing (Logic Pro) revealed three critical failures that block release. Phase 2 addresses these exclusively before any scope expansion.
+
+**Open bugs from Logic Pro testing [2026-04-18]:**
+- BUG_P2_001 (CRITICAL): Genre selection on Composition page does nothing — no progressions, no sound. No real genre→chord progression library exists. → TASK_012
+- BUG_P2_002 (HIGH): Arpeggiator at fast BPM settings corrupts the preset sound — voice accumulation / note-off failure causes timbral drift. Slow arp works. → TASK_011
+- BUG_P2_003 (HIGH): CPU 45–55% on Apple M1 under normal playing. Phase 1 target was <20%. Profiling and optimization required. → TASK_013
+
+**Additional Phase 2 work:**
+- Dead code and unused stubs removed from the codebase → TASK_014
+- Wavetable oscillator: factory library (20 tables) + file I/O + morph UI → TASK_015
+- Granular oscillator: pitch tracking fixed, scatter musically calibrated → TASK_016
+- Sample playback: multi-sample keymaps, velocity layers, loop point editing → TASK_017
+- Windows build: VST3 + Standalone verified clean on Windows 10/11 → TASK_018
+
+# PHASE 2 TASK ORDER
+Priority order (bugs block release, DSP depth and Windows are parallel):
+1. TASK_011 — Arp fix (DONE)
+2. TASK_013 — CPU optimization (blocks all real-world use)
+3. TASK_012 — Genre progressions (core feature gap)
+4. TASK_014 — Dead code removal (clean codebase before DSP work)
+5. TASK_015 — Wavetable I/O
+6. TASK_016 — Granular depth
+7. TASK_017 — Sample playback depth
+8. TASK_018 — Windows build (can run in parallel with 015–017)
 
 # NEXT MILESTONE
-Continue TASK_009+ UI and integration; parallel **quality hardening** of synthesis, FX, and modulation to reference-plugin depth (see engineering backlog / reports).
+Complete TASK_011–018 (Phase 2). Plugin is not release-ready until all three DAW-confirmed bugs are resolved (TASK_011 done, TASK_012 and TASK_013 remaining).
 
 # QUALITY BAR (NON-NEGOTIABLE)
 - If it’s in the build under a given name, it must **work properly** at a level fit for professional use.

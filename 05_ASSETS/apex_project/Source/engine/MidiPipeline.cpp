@@ -177,6 +177,7 @@ void MidiPipeline::prepare(double sampleRate, int maxBlock, juce::AudioProcessor
 {
     juce::ignoreUnused(sampleRate, maxBlock);
     bindPointers(apvts);
+    jassert(arpRateParam != nullptr);
     reset();
 }
 
@@ -361,11 +362,7 @@ float MidiPipeline::readArpRate() const noexcept
         const int idx = juce::jlimit(0, kNumRates - 1, arpRateParam->getIndex());
         return kRateTable[idx];
     }
-    // Fallback: read raw atomic and interpret as choice index via normalized value
-    if (!ptrs.arpRate)
-        return 2.f; // default 1/8
-    const int idx = readChoice(ptrs.arpRate, kNumRates, 9);
-    return kRateTable[idx];
+    return 2.f; // default 1/8
 }
 
 MidiPipeline::ArpPattern MidiPipeline::readArpPattern() const noexcept
@@ -552,7 +549,8 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     const double stepCap = juce::jmax(1.0, stepLenSamples);
     const auto gateSamples = [&](float g) noexcept -> double {
         const double want = (double)juce::jlimit(0.1f, 2.f, g) * samplesPerArpStep * juce::jmax(1.0e-6, gateScaleMul);
-        return juce::jmin(want, stepCap);
+        const double maxWant = samplesPerArpStep * 0.9;
+        return juce::jmin(juce::jmin(maxWant, want), stepCap);
     };
     const int step = juce::jlimit(0, kArpSteps - 1, stepIndex);
     const ArpPattern pat = readArpPattern();
@@ -579,6 +577,8 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     const int octShift = (int)(((uint32_t)arpNoteWalk % (uint32_t)nOct) * 12u);
     const int trn = readStepTrn(step);
 
+    const double maxGate = juce::jmax(1.0, samplesPerArpStep * 0.9);
+
     if (pat == ArpPattern::Chord)
     {
         allNotesOffOutput(out, juce::jmax(0, samplePos - 1));
@@ -591,7 +591,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
             out.addEvent(juce::MidiMessage::noteOn(1, nn, vNorm), samplePos);
             arpPolyHeld[(size_t)arpPolyCount++] = (uint8_t)nn;
         }
-        arpGateSamplesLeft = juce::jmax(64.0, gateSamples(gate01));
+        arpGateSamplesLeft = juce::jmin(maxGate, juce::jmax(1.0, gateSamples(gate01)));
         arpNoteActive = false;
         return;
     }
@@ -651,7 +651,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     out.addEvent(juce::MidiMessage::noteOn(1, nn, vNorm), samplePos);
     arpPlayingNote = (uint8_t)nn;
     arpNoteActive = true;
-    arpGateSamplesLeft = juce::jmax(64.0, gateSamples(gate01));
+    arpGateSamplesLeft = juce::jmin(maxGate, juce::jmax(1.0, gateSamples(gate01)));
     juce::ignoreUnused(advanceSequencer);
 }
 
@@ -684,6 +684,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
     const double beatsPerSecond = bpm / 60.0;
     const double stepsPerSecond = beatsPerSecond * (double)stepsPerBeat;
     samplesPerArpStep = stepsPerSecond > 1.0e-6 ? sampleRate / stepsPerSecond : sampleRate;
+    const double blockStepLen = samplesPerArpStep;
 
     double ppqBlockStart = 0.0;
     bool ppqValid = false;
@@ -713,9 +714,9 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
         if (stepBeats > 1e-12)
         {
             const double phase01 = std::fmod(std::abs(ppqBlockStart), stepBeats) / stepBeats;
-            const double ideal = phase01 * samplesPerArpStep;
+            const double ideal = phase01 * blockStepLen;
             double err = ideal - arpTimeInStep;
-            const double period = samplesPerArpStep;
+            const double period = blockStepLen;
             while (err > period * 0.5)
                 err -= period;
             while (err < -period * 0.5)
@@ -732,7 +733,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
 
             constexpr double kHardFrac = 0.34;
             constexpr double kHardMinSamples = 56.0;
-            const double hardThresh = juce::jmax(kHardMinSamples, kHardFrac * samplesPerArpStep);
+            const double hardThresh = juce::jmax(kHardMinSamples, kHardFrac * blockStepLen);
             if (std::abs(err) > hardThresh)
                 hardSnap = true;
 
@@ -810,6 +811,26 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
     });
 
     juce::MidiBuffer out;
+
+    const bool arpWasOff = !lastProcessArpOn;
+    if (arpOn && arpWasOff)
+    {
+        allNotesOffOutput(out, 0);
+        arpTimeInStep = 0;
+        arpNoteActive = false;
+        arpGateSamplesLeft = 0.0;
+        arpPoolCount = 0;
+        pressCount = 0;
+        arpPatternIndex = 0;
+        arpNoteWalk = 0;
+    }
+
+    if (!arpOn && lastProcessArpOn)
+    {
+        allNotesOffOutput(out, 0);
+        arpNoteActive = false;
+        arpGateSamplesLeft = 0.0;
+    }
 
     const bool latch = readArpLatch();
     if (lastLatch && !latch)
@@ -980,7 +1001,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
             {
                 const int si = arpPatternIndex % kArpSteps;
                 const float swing = readArpSwing();
-                double stepLen = samplesPerArpStep;
+                double stepLen = blockStepLen;
                 if (arpSwingAffectsStepLen && (si & 1) != 0 && swing > 0.f)
                     stepLen *= 1.0 + (double)swing;
 

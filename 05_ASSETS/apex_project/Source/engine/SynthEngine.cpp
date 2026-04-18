@@ -430,11 +430,9 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                     if (vi < 0)
                         vi = findOldestVoice();
 
-                    // Always treat as a soft steal: for arp retriggering the same note
-                    // this preserves oscillator phase and filter state, preventing the
-                    // timbral change / click that occurs on each arp step.
-                    const bool steal = voices[(size_t)vi].active && voices[(size_t)vi].midiNote != note;
-                    startVoice(vi, note, m.getFloatVelocity(), steal);
+                    // Always soft-steal: preserves osc phase on same-note arp retriggering.
+                    // wasActive inside startVoice handles the envelope crossfade correctly.
+                    startVoice(vi, note, m.getFloatVelocity(), true);
 
                 }
             }

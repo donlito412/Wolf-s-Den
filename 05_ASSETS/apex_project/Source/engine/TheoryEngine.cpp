@@ -828,12 +828,18 @@ void TheoryEngine::seedDatabase()
         sqlite3_finalize (stmt);
     }
 
-    if (count > 0 && set_count > 0) return; // Already seeded
+    // Each seeding section below manages its own count guard — do not early-exit
+    // here, or progressions won't seed into existing DBs that already have chords.
+    const bool chordsAlreadySeeded = (count > 0 && set_count > 0);
+
 
     // -------------------------------------------------------------------------
-    // BEGIN TRANSACTION for fast bulk insert
+    // Seed chords / scales / chord_sets only on a fresh DB
     // -------------------------------------------------------------------------
+    if (!chordsAlreadySeeded)
+    {
     sqlite3_exec (db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+
 
     // =========================================================================
     // 1. CHORD DEFINITIONS  (42 types)
@@ -1057,11 +1063,162 @@ void TheoryEngine::seedDatabase()
     }
 
     sqlite3_exec (db, "COMMIT;", nullptr, nullptr, nullptr);
-}
+    } // end if (!chordsAlreadySeeded)
+
+    // =========================================================================
+    // 4. PROGRESSIONS TABLE — seeded independently (own count-guard)
+
+    //    chord_id references (1-based, matches chords INSERT above):
+    //     1=maj  2=m  3=dim  4=aug  5=sus2  6=sus4  7=pow
+    //     8=maj6  9=m6  10=dom7  11=maj7  12=m7  13=dim7  14=m7b5
+    //     20=dom9  21=maj9  22=m9  29=7b9  30=7#9  36=aug7
+    //     41=6/9  42=m6/9
+    // All progressions seeded in C (root_key=0); the UI transposes.
+    // =========================================================================
+    {
+        int prog_count = 0;
+        sqlite3_stmt* pstmt = nullptr;
+        if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM progressions;", -1, &pstmt, nullptr) == SQLITE_OK)
+        {
+            if (sqlite3_step(pstmt) == SQLITE_ROW)
+                prog_count = sqlite3_column_int(pstmt, 0);
+            sqlite3_finalize(pstmt);
+        }
+
+        if (prog_count == 0)
+        {
+            sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+
+            // Helper lambda: insert one progression row
+            auto ins = [&](const char* name, const char* genre, const char* mood, int energy, const char* seq)
+            {
+                std::string sql =
+                    std::string("INSERT OR IGNORE INTO progressions (name,genre,mood,energy,root_key,chord_sequence) VALUES ('")
+                    + name + "','" + genre + "','" + mood + "'," + std::to_string(energy) + ",0,'" + seq + "');";
+                sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
+            };
+
+            // ---- Hip-Hop ----
+            ins("Trap God",       "Hip-Hop", "Dark",       3, "[2,12,3,2]");          // im7-bII-dim-i
+            ins("Soul Sample",    "Hip-Hop", "Melancholic", 2, "[12,22,14,10]");       // m7-m9-m7b5-dom7
+            ins("Dilla Bounce",   "Hip-Hop", "Warm",       2, "[11,12,10,22]");        // maj7-m7-dom7-m9
+            ins("Night Drive",    "Hip-Hop", "Dark",       2, "[2,2,10,2]");           // i-i-dom7-i
+            ins("Golden Era",     "Hip-Hop", "Nostalgic",  2, "[1,12,10,1]");          // I-m7-dom7-I
+            ins("Melancholy",     "Hip-Hop", "Sad",        1, "[12,14,10,2]");         // m7-m7b5-dom7-m
+            ins("West Coast",     "Hip-Hop", "Smooth",     2, "[2,12,2,12]");          // i-m7-i-m7
+            ins("Brooklyn",       "Hip-Hop", "Tense",      3, "[2,3,12,10]");          // i-dim-m7-dom7
+
+            // ---- R&B / Neo-Soul ----
+            ins("Slow Burn",      "R&B", "Sensual",   1, "[21,22,22,29]");             // Imaj9-VIm9-iim9-V7b9
+            ins("Butterfly",      "R&B", "Romantic",  2, "[11,12,10,11]");             // maj7-m7-dom7-maj7
+            ins("Neo Groove",     "R&B", "Uplifting", 2, "[21,20,22,10]");             // maj9-dom9-m9-dom7
+            ins("After Midnight", "R&B", "Dark",      1, "[22,14,10,22]");             // m9-m7b5-dom7-m9
+            ins("Summer Love",    "R&B", "Warm",      2, "[41,22,10,42]");             // 6/9-m9-dom7-m6/9
+            ins("Old School",     "R&B", "Nostalgic", 2, "[8,9,10,11]");               // maj6-m6-dom7-maj7
+            ins("Smooth Groove",  "R&B", "Smooth",    1, "[11,22,10,11]");             // maj7-m9-dom7-maj7
+            ins("Pain",           "R&B", "Sad",       1, "[12,14,10,2]");              // m7-m7b5-dom7-m
+
+            // ---- Pop ----
+            ins("Radio Hit",      "Pop", "Uplifting", 3, "[1,5,2,1]");                 // I-IV-vi-I
+            ins("Anthem",         "Pop", "Anthemic",  3, "[1,5,1,5]");                 // I-IV-I-IV
+            ins("Dancefloor",     "Pop", "Energetic", 3, "[1,2,5,1]");                 // I-vi-IV-I
+            ins("Comeback",       "Pop", "Emotional", 2, "[1,4,5,2]");                 // I-V-IV-vi (Beatles)
+            ins("Sad Pop",        "Pop", "Sad",       2, "[2,5,1,4]");                 // vi-IV-I-V
+            ins("Dreamy",         "Pop", "Dreamy",    1, "[11,22,10,11]");             // maj7-m9-dom7-maj7
+            ins("Chill Vibes",    "Pop", "Chill",     1, "[1,5,2,5]");                 // I-IV-vi-V
+            ins("Happy Day",      "Pop", "Happy",     3, "[1,4,5,4]");                 // I-V-IV-V
+
+            // ---- Jazz ----
+            ins("ii-V-I",         "Jazz", "Smooth",   2, "[12,10,11,12]");             // iim7-V7-Imaj7-iim7
+            ins("Tritone Sub",    "Jazz", "Tense",    2, "[12,29,11,12]");             // iim7-7b9-Imaj7-iim7
+            ins("Autumn Leaves",  "Jazz", "Melancholic",2,"[12,10,11,22]");            // iim7-V7-Imaj7-VIm9
+            ins("Giant Steps",    "Jazz", "Complex",  3, "[11,10,11,10]");             // Imaj7-V7-IIImaj7-V7
+            ins("Coltrane Turnaround","Jazz","Tense", 3, "[11,10,11,10]");
+            ins("Blue Bossa",     "Jazz", "Latin",    2, "[12,10,11,22]");
+            ins("So What",        "Jazz", "Cool",     1, "[12,12,12,12]");             // Dm7 modal
+            ins("Rhythm Changes", "Jazz", "Bebop",    3, "[1,2,10,1]");                // I-vi-V7-I
+
+            // ---- Lo-Fi ----
+            ins("Rainy Day",      "Lo-Fi", "Melancholic",1,"[12,22,29,12]");           // m7-m9-V7b9-m7
+            ins("Bedroom Tape",   "Lo-Fi", "Nostalgic",  1,"[11,22,10,11]");
+            ins("Sunday Morning", "Lo-Fi", "Calm",       1,"[21,22,11,10]");
+            ins("Dusty Crate",    "Lo-Fi", "Warm",       1,"[11,9,10,12]");            // maj7-m6-dom7-m7
+            ins("Late Night",     "Lo-Fi", "Dark",       1,"[12,14,10,2]");
+            ins("Coffee Shop",    "Lo-Fi", "Calm",       1,"[21,11,10,22]");
+            ins("Vintage Loop",   "Lo-Fi", "Nostalgic",  1,"[41,22,10,42]");
+            ins("Crinkle",        "Lo-Fi", "Dreamy",     1,"[11,12,12,10]");
+
+            // ---- Afrobeats ----
+            ins("Afro High Life", "Afrobeats", "Uplifting",3,"[1,4,5,1]");             // I-IV-V-I
+            ins("Lagos Nights",   "Afrobeats", "Energetic",3,"[1,2,5,4]");
+            ins("Makossa",        "Afrobeats", "Happy",    3,"[1,5,4,1]");
+            ins("Afropop",        "Afrobeats", "Euphoric", 3,"[1,1,4,5]");
+            ins("Highlife Gold",  "Afrobeats", "Warm",     2,"[1,4,1,5]");
+            ins("Juju",           "Afrobeats", "Spiritual",2,"[1,2,4,1]");
+            ins("Fuji Funk",      "Afrobeats", "Energetic",3,"[4,1,5,4]");
+            ins("Naija",          "Afrobeats", "Uplifting",3,"[1,5,4,2]");
+
+            // ---- Trap ----
+            ins("Dark Flex",      "Trap", "Dark",       3,"[2,1,2,3]");               // i-bII-i-dim
+            ins("Ominous",        "Trap", "Tense",      3,"[2,3,2,10]");              // i-dim-i-dom7
+            ins("Paranoid",       "Trap", "Aggressive", 3,"[2,14,3,2]");
+            ins("808 Roll",       "Trap", "Dark",       3,"[2,12,14,2]");
+            ins("Minor Threat",   "Trap", "Tense",      3,"[2,2,3,10]");
+            ins("Street Hymn",    "Trap", "Melancholic",2,"[12,14,10,2]");
+            ins("Icey",           "Trap", "Cold",       2,"[2,12,3,12]");
+            ins("South Side",     "Trap", "Dark",       3,"[2,10,3,2]");
+
+            // ---- EDM / Dance ----
+            ins("Euphoria",       "EDM", "Euphoric",  3,"[1,2,4,5]");
+            ins("Festival",       "EDM", "Energetic", 3,"[1,5,4,5]");
+            ins("Drop",           "EDM", "Aggressive",3,"[1,2,5,1]");
+            ins("Build Up",       "EDM", "Tense",     3,"[2,4,5,1]");
+            ins("Sunrise",        "EDM", "Uplifting", 3,"[1,4,5,2]");
+            ins("Trance Gate",    "EDM", "Euphoric",  3,"[2,4,5,2]");
+            ins("Deep House",     "EDM", "Smooth",    2,"[12,11,22,10]");
+            ins("Progressive",    "EDM", "Energetic", 3,"[2,5,4,1]");
+
+            // ---- Gospel ----
+            ins("Church Stomp",   "Gospel", "Spiritual",  3,"[1,4,1,5]");
+            ins("Hallelujah",     "Gospel", "Uplifting",  3,"[1,4,5,1]");
+            ins("Holy Ghost",     "Gospel", "Euphoric",   3,"[1,2,5,4]");
+            ins("Testimony",      "Gospel", "Emotional",  2,"[11,10,12,11]");
+            ins("Sunday Service", "Gospel", "Warm",       2,"[1,5,4,1]");
+            ins("Revival",        "Gospel", "Energetic",  3,"[1,4,5,2]");
+            ins("Amen Break",     "Gospel", "Spiritual",  3,"[4,2,5,1]");
+            ins("Walk By Faith",  "Gospel", "Uplifting",  2,"[1,2,4,5]");
+
+            // ---- Cinematic / Orchestral ----
+            ins("Heroic Theme",   "Cinematic", "Epic",       3,"[1,6,4,5]");
+            ins("Sad Reprise",    "Cinematic", "Sad",        1,"[2,5,1,4]");
+            ins("Tension Build",  "Cinematic", "Tense",      3,"[2,3,14,10]");
+            ins("Resolution",     "Cinematic", "Uplifting",  2,"[2,4,5,1]");
+            ins("Flashback",      "Cinematic", "Nostalgic",  1,"[11,12,10,11]");
+            ins("Dark Matter",    "Cinematic", "Dark",       2,"[2,3,12,14]");
+            ins("Victory",        "Cinematic", "Epic",       3,"[1,4,5,4]");
+            ins("Elegy",          "Cinematic", "Melancholic",1,"[12,14,10,2]");
+
+            // ---- Blues ----
+            ins("12-Bar Shuffle", "Blues", "Gritty",  2,"[10,10,10,10]");             // I7-I7-IV7-V7
+            ins("Texas Stomp",    "Blues", "Energetic",3,"[10,5,10,10]");
+            ins("Delta Blues",    "Blues", "Melancholic",2,"[10,10,13,10]");           // with dim
+            ins("Slow Blues",     "Blues", "Sad",      1,"[10,10,10,14]");
+            ins("Jump Blues",     "Blues", "Happy",    3,"[10,5,10,5]");
+            ins("Boogie Woogie",  "Blues", "Energetic",3,"[10,10,5,10]");
+            ins("Minor Blues",    "Blues", "Dark",     2,"[12,12,14,10]");
+            ins("Chicago",        "Blues", "Smooth",   2,"[10,12,10,5]");
+
+            sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+        }
+    }
+
+
+} // end seedDatabase()
 
 // =============================================================================
 // Database — load into memory
 // =============================================================================
+
 
 void TheoryEngine::loadChordDefinitions()
 {

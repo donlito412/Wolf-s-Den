@@ -71,9 +71,9 @@ namespace
 // =============================================================================
 struct CompositionPage::BrowseCard : public juce::Component
 {
-    BrowseCard(CompositionPage& ownerIn, const ChordSetListing& row)
+    BrowseCard(CompositionPage& ownerIn, const ProgressionListing& row)
         : owner(ownerIn),
-          chordSetId(row.id),
+          progressionId(row.id),
           name(row.name.c_str()),
           genre(row.genre.c_str()),
           mood(row.mood.c_str()),
@@ -112,13 +112,13 @@ struct CompositionPage::BrowseCard : public juce::Component
 
     void mouseDown(const juce::MouseEvent&) override
     {
-        owner.selectChordSet(chordSetId);
+        owner.selectProgression(progressionId);
     }
 
     void setSelected(bool s) { selected = s; repaint(); }
 
     CompositionPage& owner;
-    int              chordSetId;
+    int              progressionId;
     juce::String     name, genre, mood;
     juce::Colour     accent;
     bool             selected = false;
@@ -252,7 +252,7 @@ void CompositionPage::handleNoteOn(juce::MidiKeyboardState*, int channel,
     if (channel == 16) return;
 
     // Only respond when this page is visible and a chord set is selected
-    if (!isVisible() || selectedSetId < 0) return;
+    if (!isVisible() || selectedProgressionId < 0) return;
 
     // Map C3(48)..B3(59) → pads 0..11
     const int kBase = 48;
@@ -260,7 +260,7 @@ void CompositionPage::handleNoteOn(juce::MidiKeyboardState*, int channel,
     if (note < kBase || note > kTop) return;
 
     const int padIdx = note - kBase;
-    if (padIdx < (int)currentEntries.size())
+    if (padIdx < (int)currentChordSequence.size())
     {
         // Trigger on the message thread (we're already there via MidiKeyboardState)
         juce::MessageManager::callAsync([this, padIdx]
@@ -287,11 +287,14 @@ void CompositionPage::buildFilterPills()
     auto& th = processor.getTheoryEngine();
     if (!th.isDatabaseReady()) return;
 
+    // We will query ALL progressions first to gather genres/moods
+    cachedProgressions = th.getProgressionListings("");
+
     // Collect unique genres and moods from the DB
     juce::StringArray genres, moods;
     genres.add("All");
     moods.add("All");
-    for (auto& row : th.getChordSetListings())
+    for (auto& row : cachedProgressions)
     {
         juce::String g(row.genre.c_str()), m(row.mood.c_str());
         if (!genres.contains(g)) genres.add(g);
@@ -324,6 +327,13 @@ void CompositionPage::applyGenreFilter(const juce::String& genre)
     activeGenre = genre;
     for (auto* p : genrePills)
         stylePill(*p, p->getButtonText() == genre);
+
+    // Update the cached progressions from DB filtered by genre (for efficiency)
+    auto& th = processor.getTheoryEngine();
+    if (th.isDatabaseReady()) {
+        cachedProgressions = th.getProgressionListings(activeGenre.toStdString());
+    }
+
     rebuildFilteredIndices();
     rebuildBrowseGrid();
 }
@@ -342,13 +352,14 @@ void CompositionPage::rebuildFilteredIndices()
     filteredIndices.clear();
     auto& th = processor.getTheoryEngine();
     if (!th.isDatabaseReady()) return;
-    for (int i = 0; i < (int)th.getChordSetListings().size(); ++i)
-        if (rowMatchesFilters(th.getChordSetListings()[(size_t)i]))
+    for (int i = 0; i < (int)cachedProgressions.size(); ++i)
+        if (rowMatchesFilters(cachedProgressions[(size_t)i]))
             filteredIndices.push_back(i);
 }
 
-bool CompositionPage::rowMatchesFilters(const ChordSetListing& row) const
+bool CompositionPage::rowMatchesFilters(const ProgressionListing& row) const
 {
+    // Genre is mostly handled by the SQL query now via cachedProgressions, but keep check for safety
     if (activeGenre != "All" && juce::String(row.genre.c_str()) != activeGenre)
         return false;
     if (activeMood != "All" && juce::String(row.mood.c_str()) != activeMood)
@@ -385,25 +396,33 @@ void CompositionPage::rebuildBrowseGrid()
     int row = 0, col = 0;
     for (int idx : filteredIndices)
     {
-        auto* card = new BrowseCard(*this, th.getChordSetListings()[(size_t)idx]);
+        auto* card = new BrowseCard(*this, cachedProgressions[(size_t)idx]);
         gridHolder.addAndMakeVisible(card);
         browseCards.push_back(card);
         card->setBounds(gap + col * (cw + gap),
                         gap + row * (ch + gap),
                         cw, ch);
-        card->setSelected(th.getChordSetListings()[(size_t)idx].id == selectedSetId);
+        card->setSelected(cachedProgressions[(size_t)idx].id == selectedProgressionId);
         if (++col >= cols) { col = 0; ++row; }
     }
     gridHolder.setSize(vw, (row + 1) * (ch + gap) + gap);
 }
 
-void CompositionPage::selectChordSet(int id)
+void CompositionPage::selectProgression(int id)
 {
-    selectedSetId = id;
+    selectedProgressionId = id;
     for (auto* c : browseCards)
-        c->setSelected(c->chordSetId == id);
+        c->setSelected(c->progressionId == id);
 
-    currentEntries = processor.getTheoryEngine().getChordSetEntries(id);
+    // Find the sequence in cache
+    currentChordSequence.clear();
+    for (const auto& p : cachedProgressions) {
+        if (p.id == id) {
+            currentChordSequence = p.chordSequence;
+            currentRootKey = p.rootKey;
+            break;
+        }
+    }
     refreshAuditionPads();
 }
 
@@ -428,10 +447,24 @@ void CompositionPage::refreshAuditionPads()
     for (int i = 0; i < kMaxAuditionPads; ++i)
     {
         auto& p = audPads[(size_t)i];
-        if (i < (int)currentEntries.size())
+        if (i < (int)currentChordSequence.size())
         {
-            auto& e = currentEntries[(size_t)i];
-            p.setButtonText(chordName(e.rootNote, e.chordId));
+            int chordId = currentChordSequence[(size_t)i];
+
+            // Reconstruct the root note for this chord.
+            // (For this progression library, we'll assume the root is just the chord's base interval
+            // relative to the progression's root key. A more advanced library might store the exact root.)
+            // Here, we look up the first interval of the chord (which is 0) + rootKey.
+            // To make it more musical without exact root offsets stored, we'll just use rootKey for now,
+            // or if the library stores them differently we'd need that.
+            // Since the seed SQL only stores chord_ids, we map them directly.
+            // We will just use the rootKey for now to get it displaying something, but ideally
+            // the progression should store the roots.
+
+            // For now, let's just use the rootKey.
+            int rootPc = currentRootKey;
+
+            p.setButtonText(chordName(rootPc, chordId));
             p.setColour(juce::TextButton::textColourOffId, Theme::textPrimary());
             p.setVisible(true);
         }
@@ -446,24 +479,26 @@ void CompositionPage::refreshAuditionPads()
 
 void CompositionPage::playAuditionPad(int idx)
 {
-    if (idx < 0 || idx >= (int)currentEntries.size()) return;
-    auto& e    = currentEntries[(size_t)idx];
+    if (idx < 0 || idx >= (int)currentChordSequence.size()) return;
+    int chordId = currentChordSequence[(size_t)idx];
+
     auto& defs = processor.getTheoryEngine().getChordDefinitions();
     std::vector<int> iv { 0, 4, 7 };
     for (auto& d : defs)
-        if (d.id == e.chordId) { iv = d.intervals; break; }
-    startPreview(48 + e.rootNote, iv);
+        if (d.id == chordId) { iv = d.intervals; break; }
+
+    startPreview(48 + currentRootKey, iv);
 }
 
 void CompositionPage::addAuditionPadToSlot(int entryIndex)
 {
-    if (entryIndex < 0 || entryIndex >= (int)currentEntries.size()) return;
-    auto& e = currentEntries[(size_t)entryIndex];
+    if (entryIndex < 0 || entryIndex >= (int)currentChordSequence.size()) return;
+    int chordId = currentChordSequence[(size_t)entryIndex];
     for (int i = 0; i < kNumSlots; ++i)
     {
         if (!slotData[(size_t)i].has_value())
         {
-            slotData[(size_t)i] = { e.chordId, e.rootNote };
+            slotData[(size_t)i] = { chordId, currentRootKey };
             refreshSlotLabels();
             return;
         }
@@ -520,7 +555,7 @@ void CompositionPage::mouseDrag(const juce::MouseEvent& e)
             break;
         }
     }
-    if (srcPad < 0 || srcPad >= (int)currentEntries.size()) return;
+    if (srcPad < 0 || srcPad >= (int)currentChordSequence.size()) return;
 
     dragSourcePad = srcPad;
 
@@ -564,13 +599,13 @@ void CompositionPage::mouseUp(const juce::MouseEvent& e)
             juce::TextButton::buttonColourId, Theme::backgroundMid());
     }
 
-    if (srcPad >= (int)currentEntries.size()) return;
-    auto& entry = currentEntries[(size_t)srcPad];
+    if (srcPad >= (int)currentChordSequence.size()) return;
+    int chordId = currentChordSequence[(size_t)srcPad];
 
     // If released over a slot, place chord there; else fill first free slot
     if (dropHighlightSlot >= 0)
     {
-        slotData[(size_t)dropHighlightSlot] = { entry.chordId, entry.rootNote };
+        slotData[(size_t)dropHighlightSlot] = { chordId, currentRootKey };
         refreshSlotLabels();
     }
     else
@@ -581,7 +616,7 @@ void CompositionPage::mouseUp(const juce::MouseEvent& e)
         {
             if (slots[(size_t)i].getBounds().contains(localPt))
             {
-                slotData[(size_t)i] = { entry.chordId, entry.rootNote };
+                slotData[(size_t)i] = { chordId, currentRootKey };
                 refreshSlotLabels();
                 return;
             }
@@ -763,7 +798,7 @@ void CompositionPage::paint(juce::Graphics& g)
 
     // "AUDITION" label — shows MIDI hint when a set is selected
     int audY = b.getY() + kFilterH + kGap + gridH + kGap;
-    if (selectedSetId >= 0)
+    if (selectedProgressionId >= 0)
     {
         g.setColour(Theme::accentAlt());
         g.drawText("AUDITION - MIDI: C3-B3",

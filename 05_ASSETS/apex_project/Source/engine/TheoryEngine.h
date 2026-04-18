@@ -66,6 +66,18 @@ struct ChordSetEntry
     int chordId   = 0;   ///< index into getChordDefinitions()
 };
 
+/** One row from `progressions` for TASK_012 composition library. */
+struct ProgressionListing
+{
+    int id = 0;
+    std::string name;
+    std::string genre;
+    std::string mood;
+    int energy = 2;
+    int rootKey = 0;
+    std::vector<int> chordSequence; // parsed JSON array of chord_id values
+};
+
 /** One row from `packs` — a factory or expansion content pack. */
 struct PackListing
 {
@@ -251,6 +263,10 @@ public:
     const std::vector<ChordSetListing>& getChordSetListings() const noexcept { return chordSetList; }
     /** Returns the ordered chord entries for a chord set, queried live from the DB. */
     std::vector<ChordSetEntry> getChordSetEntries (int setId) const;
+
+    /** Returns all progressions, optionally filtered by genre (empty = all) */
+    std::vector<ProgressionListing> getProgressionListings(const std::string& genre = "") const;
+
     const std::vector<PresetListing>&   getPresetListings()   const noexcept { return presetList; }
     const std::vector<PackListing>&     getPackListings()     const noexcept { return packList; }
     int getChordCount() const noexcept { return static_cast<int> (chordDefs.size()); }

@@ -16,6 +16,7 @@ namespace wolfsden
 struct ChordSetListing;
 struct ChordSetEntry;
 struct ChordDefinition;
+struct ProgressionListing;
 }
 
 namespace wolfsden::ui
@@ -60,13 +61,13 @@ private:
     void applyGenreFilter(const juce::String& genre);
     void applyMoodFilter(const juce::String& mood);
     void rebuildFilteredIndices();
-    bool rowMatchesFilters(const wolfsden::ChordSetListing& row) const;
+    bool rowMatchesFilters(const wolfsden::ProgressionListing& row) const;
 
     // =========================================================================
     // Browse grid
     // =========================================================================
     void rebuildBrowseGrid();
-    void selectChordSet(int chordSetId);
+    void selectProgression(int progressionId);
 
     // =========================================================================
     // Audition pads
@@ -122,12 +123,14 @@ private:
     struct BrowseCard;                     // defined in .cpp
     std::vector<BrowseCard*> browseCards;
     std::vector<int>         filteredIndices;
-    int selectedSetId = -1;
+    int selectedProgressionId = -1;
+    std::vector<wolfsden::ProgressionListing> cachedProgressions;
 
     // --- Audition row ---
     static constexpr int kMaxAuditionPads = 16;
     std::array<juce::TextButton, kMaxAuditionPads> audPads;
-    std::vector<wolfsden::ChordSetEntry> currentEntries;
+    std::vector<int> currentChordSequence;
+    int currentRootKey = 0;
 
     // --- Drag state (audition pad → slot tracking via MouseListener) ---
     int dragSourcePad     = -1;   ///< audition pad index being dragged, or -1
