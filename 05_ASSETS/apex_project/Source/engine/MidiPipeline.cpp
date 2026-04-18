@@ -182,9 +182,6 @@ void MidiPipeline::prepare(double sampleRate, int maxBlock, juce::AudioProcessor
 
 void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
 {
-    arpRateParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_rate"));
-    arpSwingParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_swing"));
-    arpPatternChoice = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_pattern"));
     ptrs.keysLockMode = apvts.getRawParameterValue("midi_keys_lock_mode");
     ptrs.chordMode = apvts.getRawParameterValue("midi_chord_mode");
     ptrs.chordType = apvts.getRawParameterValue("theory_chord_type");
@@ -208,7 +205,6 @@ void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
         arpStepPtrs[(size_t)si].dur = apvts.getRawParameterValue(pfx + "dur");
         arpStepPtrs[(size_t)si].trn = apvts.getRawParameterValue(pfx + "trn");
         arpStepPtrs[(size_t)si].rkt = apvts.getRawParameterValue(pfx + "rkt");
-        arpStepDurParams[(size_t)si] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(pfx + "dur"));
     }
     pointersBound = true;
 }
@@ -237,11 +233,6 @@ float MidiPipeline::readStepDur(int stepIndex) const noexcept
     if (!p)
         return 1.f;
     const float v = readAP(p, 1.f);
-    if (auto* pf = arpStepDurParams[(size_t)stepIndex])
-    {
-        const auto r = pf->getNormalisableRange();
-        return juce::jlimit(r.start, r.end, v);
-    }
     return juce::jlimit(0.1f, 2.f, v);
 }
 
@@ -355,12 +346,6 @@ float MidiPipeline::readArpRate() const noexcept
         32.f,    32.f  / 1.5f,  32.f  * 1.5f,   // 1/128, 1/128D, 1/128T
     };
     static constexpr int kNumRates = (int)(sizeof(kRateTable) / sizeof(kRateTable[0]));
-
-    if (arpRateParam != nullptr)
-    {
-        const int idx = juce::jlimit(0, kNumRates - 1, arpRateParam->getIndex());
-        return kRateTable[idx];
-    }
     // Fallback: read raw atomic and interpret as choice index via normalized value
     if (!ptrs.arpRate)
         return 2.f; // default 1/8
@@ -370,11 +355,6 @@ float MidiPipeline::readArpRate() const noexcept
 
 MidiPipeline::ArpPattern MidiPipeline::readArpPattern() const noexcept
 {
-    if (arpPatternChoice != nullptr)
-    {
-        const int n = (int)ArpPattern::numPatterns;
-        return (ArpPattern) juce::jlimit(0, n - 1, arpPatternChoice->getIndex());
-    }
     return (ArpPattern) readChoice(ptrs.arpPattern, (int) ArpPattern::numPatterns, 0);
 }
 
@@ -386,11 +366,6 @@ bool MidiPipeline::readArpLatch() const noexcept
 float MidiPipeline::readArpSwing() const noexcept
 {
     const float v = readAP(ptrs.arpSwing, 0.f);
-    if (arpSwingParam != nullptr)
-    {
-        const auto r = arpSwingParam->getNormalisableRange();
-        return juce::jlimit(r.start, r.end, v);
-    }
     return juce::jlimit(0.f, 0.5f, v);
 }
 
@@ -655,7 +630,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     nn += trn + octShift;
     nn = juce::jlimit(0, 127, nn);
 
-    if (!arpNoteActive || arpPlayingNote != (uint8_t)nn)
+    if (arpNoteActive)
     {
         allNotesOffOutput(out, samplePos);
         arpGateSamplesLeft = 0.0;
@@ -870,7 +845,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 {
                     const int tidx = readChordTypeIndex();
                     const ChordTypeData& cd = kChordTypes[juce::jmin(tidx, kNumChordTypesUi - 1)];
-                    int chordRootMidi = *locked;
+                    int chordRootMidi = juce::jlimit(0, 127, *locked + 12);
                     const int anch = readChordRootAnchor();
                     if (anch > 0)
                     {

@@ -209,12 +209,6 @@ void VoiceLayer::noteOnSteal(int midiNote,
     currentNote = midiNote;
     currentVel = velocity;
     filterUpdateTick_ = kFilterUpdateInterval; // force immediate filter recalc on next render
-    phaseSin = phaseSaw = phaseSq = phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
-    triIntegrator = 0;
-    uniSin.fill(0.0);
-    uniSaw.fill(0.0);
-    uniSq.fill(0.0);
-    uniTri.fill(0.0);
     ampAdsr.noteOnFromLevel(ampEnvLevel * 0.92);
     filtAdsr.noteOnFromLevel(filtEnvLevel * 0.92);
     glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);

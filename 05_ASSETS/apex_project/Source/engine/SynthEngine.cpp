@@ -429,7 +429,7 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                     if (vi < 0)
                         vi = findOldestVoice();
 
-                    const bool steal = voices[(size_t)vi].active && voices[(size_t)vi].midiNote != note;
+                    const bool steal = voices[(size_t)vi].active;
                     startVoice(vi, note, m.getFloatVelocity(), steal);
                 }
             }
