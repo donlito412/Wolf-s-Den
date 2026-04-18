@@ -264,7 +264,8 @@ int SynthEngine::findOldestVoice() noexcept
 void SynthEngine::startVoice(int voiceIndex, int note, float velocity, bool softSteal) noexcept
 {
     auto& v = voices[(size_t)voiceIndex];
-    const bool wasActive = v.active && v.midiNote != note;
+    const bool wasActive = v.active; // any active voice uses soft steal — preserves osc phase
+
     double ae = 0, fe = 0;
     if (softSteal && wasActive)
     {
@@ -429,8 +430,12 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                     if (vi < 0)
                         vi = findOldestVoice();
 
-                    const bool steal = voices[(size_t)vi].active;
+                    // Always treat as a soft steal: for arp retriggering the same note
+                    // this preserves oscillator phase and filter state, preventing the
+                    // timbral change / click that occurs on each arp step.
+                    const bool steal = voices[(size_t)vi].active && voices[(size_t)vi].midiNote != note;
                     startVoice(vi, note, m.getFloatVelocity(), steal);
+
                 }
             }
             else if (m.isNoteOff() || (m.isNoteOn() && m.getVelocity() == 0))

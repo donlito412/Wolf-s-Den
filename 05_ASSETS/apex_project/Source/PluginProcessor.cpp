@@ -241,6 +241,10 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
     if (pendingAllNotesOff.exchange(false, std::memory_order_acq_rel))
         synthEngine.allNotesOff();
 
+    // Reset MIDI pipeline state (arp pool, chord maps) on preset change
+    if (pendingMidiPipelineReset.exchange(false, std::memory_order_acq_rel))
+        midiPipeline.reset();
+
     bool playingInfo = false;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
@@ -484,6 +488,7 @@ bool WolfsDenAudioProcessor::loadPresetById (int presetId)
     // The flag is consumed on the next audio-thread processBlock() call, which
     // guarantees no race condition — allNotesOff() only ever runs on the audio thread.
     pendingAllNotesOff.store(true, std::memory_order_release);
+    pendingMidiPipelineReset.store(true, std::memory_order_release);
 
     if (preset.isFactory)
     {

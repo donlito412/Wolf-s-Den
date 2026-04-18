@@ -182,6 +182,9 @@ void MidiPipeline::prepare(double sampleRate, int maxBlock, juce::AudioProcessor
 
 void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
 {
+    arpRateParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_rate"));
+    arpSwingParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_swing"));
+    arpPatternChoice = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_pattern"));
     ptrs.keysLockMode = apvts.getRawParameterValue("midi_keys_lock_mode");
     ptrs.chordMode = apvts.getRawParameterValue("midi_chord_mode");
     ptrs.chordType = apvts.getRawParameterValue("theory_chord_type");
@@ -205,6 +208,7 @@ void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
         arpStepPtrs[(size_t)si].dur = apvts.getRawParameterValue(pfx + "dur");
         arpStepPtrs[(size_t)si].trn = apvts.getRawParameterValue(pfx + "trn");
         arpStepPtrs[(size_t)si].rkt = apvts.getRawParameterValue(pfx + "rkt");
+        arpStepDurParams[(size_t)si] = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter(pfx + "dur"));
     }
     pointersBound = true;
 }
@@ -233,6 +237,11 @@ float MidiPipeline::readStepDur(int stepIndex) const noexcept
     if (!p)
         return 1.f;
     const float v = readAP(p, 1.f);
+    if (auto* pf = arpStepDurParams[(size_t)stepIndex])
+    {
+        const auto r = pf->getNormalisableRange();
+        return juce::jlimit(r.start, r.end, v);
+    }
     return juce::jlimit(0.1f, 2.f, v);
 }
 
@@ -346,6 +355,12 @@ float MidiPipeline::readArpRate() const noexcept
         32.f,    32.f  / 1.5f,  32.f  * 1.5f,   // 1/128, 1/128D, 1/128T
     };
     static constexpr int kNumRates = (int)(sizeof(kRateTable) / sizeof(kRateTable[0]));
+
+    if (arpRateParam != nullptr)
+    {
+        const int idx = juce::jlimit(0, kNumRates - 1, arpRateParam->getIndex());
+        return kRateTable[idx];
+    }
     // Fallback: read raw atomic and interpret as choice index via normalized value
     if (!ptrs.arpRate)
         return 2.f; // default 1/8
@@ -355,6 +370,11 @@ float MidiPipeline::readArpRate() const noexcept
 
 MidiPipeline::ArpPattern MidiPipeline::readArpPattern() const noexcept
 {
+    if (arpPatternChoice != nullptr)
+    {
+        const int n = (int)ArpPattern::numPatterns;
+        return (ArpPattern) juce::jlimit(0, n - 1, arpPatternChoice->getIndex());
+    }
     return (ArpPattern) readChoice(ptrs.arpPattern, (int) ArpPattern::numPatterns, 0);
 }
 
@@ -366,6 +386,11 @@ bool MidiPipeline::readArpLatch() const noexcept
 float MidiPipeline::readArpSwing() const noexcept
 {
     const float v = readAP(ptrs.arpSwing, 0.f);
+    if (arpSwingParam != nullptr)
+    {
+        const auto r = arpSwingParam->getNormalisableRange();
+        return juce::jlimit(r.start, r.end, v);
+    }
     return juce::jlimit(0.f, 0.5f, v);
 }
 
@@ -540,14 +565,8 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     rebuildArpSortBuffer();
 
     if (!readStepOn(step))
-    {
-        if (advanceSequencer)
-        {
-            arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
-            ++arpFullStepCount;
-        }
         return;
-    }
+
 
     int noteIdx = 0;
     const int nNotes = (int)arpSortedCount;
@@ -562,7 +581,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
 
     if (pat == ArpPattern::Chord)
     {
-        allNotesOffOutput(out, samplePos);
+        allNotesOffOutput(out, juce::jmax(0, samplePos - 1));
         arpPolyCount = 0;
         for (int i = 0; i < nNotes && arpPolyCount < kMaxChordTones; ++i)
         {
@@ -572,14 +591,8 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
             out.addEvent(juce::MidiMessage::noteOn(1, nn, vNorm), samplePos);
             arpPolyHeld[(size_t)arpPolyCount++] = (uint8_t)nn;
         }
-        arpGateSamplesLeft = gateSamples(gate01);
+        arpGateSamplesLeft = juce::jmax(64.0, gateSamples(gate01));
         arpNoteActive = false;
-        if (advanceSequencer)
-        {
-            arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
-            ++arpFullStepCount;
-            ++arpNoteWalk;
-        }
         return;
     }
 
@@ -630,22 +643,16 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     nn += trn + octShift;
     nn = juce::jlimit(0, 127, nn);
 
-    if (arpNoteActive)
+    if (!arpNoteActive || arpPlayingNote != (uint8_t)nn)
     {
-        allNotesOffOutput(out, samplePos);
+        allNotesOffOutput(out, juce::jmax(0, samplePos - 1));
         arpGateSamplesLeft = 0.0;
     }
     out.addEvent(juce::MidiMessage::noteOn(1, nn, vNorm), samplePos);
     arpPlayingNote = (uint8_t)nn;
     arpNoteActive = true;
-    arpGateSamplesLeft = gateSamples(gate01);
-
-    if (advanceSequencer)
-    {
-        arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
-        ++arpFullStepCount;
-        ++arpNoteWalk;
-    }
+    arpGateSamplesLeft = juce::jmax(64.0, gateSamples(gate01));
+    juce::ignoreUnused(advanceSequencer);
 }
 
 void MidiPipeline::process(juce::MidiBuffer& midi,
@@ -815,6 +822,10 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
     }
     lastLatch = latch;
 
+    // Purge orphaned notes from the arp pool (e.g. after preset/chord-mode changes)
+    if (arpOn)
+        cleanup();
+
     size_t inIx = 0;
 
     for (int s = 0; s < numSamples; ++s)
@@ -845,7 +856,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 {
                     const int tidx = readChordTypeIndex();
                     const ChordTypeData& cd = kChordTypes[juce::jmin(tidx, kNumChordTypesUi - 1)];
-                    int chordRootMidi = juce::jlimit(0, 127, *locked + 12);
+                    int chordRootMidi = *locked;
                     const int anch = readChordRootAnchor();
                     if (anch > 0)
                     {
@@ -961,7 +972,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
             if (arpGateSamplesLeft > 0)
             {
                 arpGateSamplesLeft -= 1.0;
-                if (arpGateSamplesLeft <= 2.0)
+                if (arpGateSamplesLeft <= 0.0)
                     allNotesOffOutput(out, s);
             }
 
@@ -979,7 +990,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 if (readStepOn(si))
                 {
                     const int R = juce::jmax(1, readStepRkt(si));
-                    // At most one ratchet hit per audio sample — avoids multiple noteOns same sample (voice retrigger / hash).
+                    // At most one ratchet hit per audio sample.
                     const int Rsafe = juce::jmin(R, juce::jmax(1, (int)std::floor(stepLen)));
                     const double subLen = stepLen / (double)Rsafe;
                     const float gate01 = readStepDur(si);
@@ -987,15 +998,23 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                     {
                         const double b = (double)k * subLen;
                         if (prevT < b - 1e-9 && arpTimeInStep >= b - 1e-9)
-                            fireArpStep(out, s, si, gate01, stepLen, 1.0 / (double)Rsafe, sampleRate, k == Rsafe);
+                            // advanceSequencer=false: sequencer is advanced unconditionally
+                            // at the step boundary below, avoiding missed advances.
+                            fireArpStep(out, s, si, gate01, stepLen, 1.0 / (double)Rsafe, sampleRate, false);
                     }
                 }
 
                 if (arpTimeInStep >= stepLen - 1e-9)
                 {
                     arpTimeInStep -= stepLen;
-                    if (!readStepOn(si))
-                        arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
+                    // Unconditionally advance the pattern and note walk here.
+                    // Previously this was split between fireArpStep and this block,
+                    // causing the sequencer to stall whenever ratchet math didn't
+                    // land exactly on the boundary.
+                    arpPatternIndex = (arpPatternIndex + 1) % kArpSteps;
+                    ++arpFullStepCount;
+                    if (readStepOn(si))
+                        ++arpNoteWalk;
                 }
             }
             else

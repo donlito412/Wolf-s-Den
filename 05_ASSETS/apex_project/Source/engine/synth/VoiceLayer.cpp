@@ -211,6 +211,7 @@ void VoiceLayer::noteOnSteal(int midiNote,
     filterUpdateTick_ = kFilterUpdateInterval; // force immediate filter recalc on next render
     ampAdsr.noteOnFromLevel(ampEnvLevel * 0.92);
     filtAdsr.noteOnFromLevel(filtEnvLevel * 0.92);
+
     glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f);
     glideHz = glideTargetHz;
     samplePlayer.syncPendingToCache();

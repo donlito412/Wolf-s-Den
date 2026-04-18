@@ -42,6 +42,7 @@ private:
     WolfsDenAudioProcessor& processor;
 
     juce::Label logoLabel;
+    juce::Label versionLabel;
     juce::TextButton tabSynth { "SYNTH" };
     juce::TextButton tabComposition { "COMPOSE" };
     juce::TextButton tabFx { "FX" };

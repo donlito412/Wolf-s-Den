@@ -191,6 +191,7 @@ private:
     std::atomic<bool> isHostPlaying { false };
     std::atomic<int> midiActivityFlag { 0 }; // 1 = flash LED until UI consumes
     std::atomic<bool> pendingAllNotesOff { false }; // set by UI thread; consumed by audio thread
+    std::atomic<bool> pendingMidiPipelineReset { false }; // reset arp/chord state on preset change
 
     // -------------------------------------------------------------------------
     // MIDI capture (records note/CC events to an in-memory ring, then exports MIDI)

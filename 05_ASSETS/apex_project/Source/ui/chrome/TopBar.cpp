@@ -9,10 +9,19 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
     : processor(proc)
 {
     startTimerHz(8);
-    logoLabel.setText("Howling Wolves", juce::dontSendNotification);
+    logoLabel.setText("HOWLING WOLVES", juce::dontSendNotification);
     logoLabel.setFont(Theme::fontPanelHeader());
     logoLabel.setColour(juce::Label::textColourId, Theme::accentHot());
     addAndMakeVisible(logoLabel);
+
+    versionLabel.setText("v2.3", juce::dontSendNotification);
+    versionLabel.setFont(juce::Font(10.f));
+    versionLabel.setColour(juce::Label::textColourId, Theme::textSecondary());
+    versionLabel.setJustificationType(juce::Justification::bottomLeft);
+    versionLabel.setInterceptsMouseClicks(false, false);
+    addAndMakeVisible(versionLabel);
+
+
 
     for (auto* t : tabs)
     {
@@ -122,7 +131,9 @@ void TopBar::paint(juce::Graphics& g)
 void TopBar::resized()
 {
     auto r = getLocalBounds().reduced(8, 6);
-    logoLabel.setBounds(r.removeFromLeft(100));
+    auto logoArea = r.removeFromLeft(160);
+    logoLabel.setBounds(logoArea.removeFromTop(logoArea.getHeight() * 2 / 3));
+    versionLabel.setBounds(logoArea);
     r.removeFromLeft(12);
 
     const int tabW = juce::jlimit(72, 100, r.getWidth() / 8);

@@ -233,6 +233,10 @@ private:
 
     Ptrs ptrs {};
     std::array<ArpStepPtrs, kArpSteps> arpStepPtrs {};
+    juce::AudioParameterChoice* arpRateParam = nullptr;
+    juce::AudioParameterFloat* arpSwingParam = nullptr;
+    juce::AudioParameterChoice* arpPatternChoice = nullptr;
+    std::array<juce::AudioParameterFloat*, kArpSteps> arpStepDurParams {};
     bool pointersBound = false;
 
     /** PPQ phase snap only on arp enable — avoids fighting per-sample advance (MIDI zipper/static). */
