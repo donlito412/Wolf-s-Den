@@ -14,6 +14,7 @@ public:
 
     void paint(juce::Graphics&) override;
     void resized() override;
+    bool keyPressed(const juce::KeyPress& key) override;
 
 private:
     WolfsDenAudioProcessor& audioProcessor;

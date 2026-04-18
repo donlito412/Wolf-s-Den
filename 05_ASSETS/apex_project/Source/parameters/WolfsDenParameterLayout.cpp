@@ -256,7 +256,7 @@ void addLayerParams(int layerIndex,
 }
 } // namespace
 
-juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout(const TheoryEngine* theory)
+juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
@@ -266,32 +266,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout(const Th
         { "LP24", "LP12", "BP", "HP12", "Notch", "HP24", "Comb", "Formant" });
 
     juce::StringArray scaleTypeChoices;
-    if (theory != nullptr)
-    {
-        for (const auto& s : theory->getScaleDefinitions())
-            scaleTypeChoices.add(s.name);
-    }
-    if (scaleTypeChoices.isEmpty())
-    {
-        scaleTypeChoices = { "Major", "Natural Minor", "Harmonic Minor", "Melodic Minor", "Dorian", "Phrygian", "Lydian",
-                             "Mixolydian", "Pent Maj", "Pent Min", "Blues", "Whole Tone", "Diminished", "Chromatic" };
-    }
+    scaleTypeChoices = { "Major", "Natural Minor", "Harmonic Minor", "Melodic Minor", "Dorian", "Phrygian", "Lydian",
+                         "Mixolydian", "Pent Maj", "Pent Min", "Blues", "Whole Tone", "Diminished", "Chromatic" };
 
     juce::StringArray chordTypeChoices;
-    if (theory != nullptr)
-    {
-        for (const auto& c : theory->getChordDefinitions())
-            chordTypeChoices.add(c.name);
-    }
-    if (chordTypeChoices.isEmpty())
-    {
-        chordTypeChoices = { "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4", "Maj7", "Min7", "Dom7", "Min7b5", "Dim7",
-                             "MinMaj7", "Add9", "Maj9", "Min9" };
-    }
+    chordTypeChoices = { "Major", "Minor", "Dim", "Aug", "Sus2", "Sus4", "Maj7", "Min7", "Dom7", "Min7b5", "Dim7",
+                         "MinMaj7", "Add9", "Maj9", "Min9" };
     const juce::StringArray chordRootAnchorChoices(
         { "Follow keys", "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" });
     const juce::StringArray keysLockChoices(
-        { "Off", "Remap", "Mute", "Chord Tones", "Chord Scales" });
+        { "Off", "Remap", "Mute", "Chord Tones", "Chord Scales", "Diatonic Chords" });
     const juce::StringArray arpPatternChoices(
         { "Up", "Down", "Up-Down", "Order", "Chord", "Random" });
     const juce::StringArray lfoShapeChoices(
@@ -432,11 +416,33 @@ juce::AudioProcessorValueTreeState::ParameterLayout makeParameterLayout(const Th
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         pid("midi_arp_on"), "Arpeggiator", false));
 
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        pid("midi_arp_rate"),
-        "Arp Rate",
-        juce::NormalisableRange<float>(0.25f, 32.f, 0.f, 0.45f),
-        4.f));
+    const juce::StringArray arpRateChoices({ "1/1",
+                                             "1/1D",
+                                             "1/1T",
+                                             "1/2",
+                                             "1/2D",
+                                             "1/2T",
+                                             "1/4",
+                                             "1/4D",
+                                             "1/4T",
+                                             "1/8",
+                                             "1/8D",
+                                             "1/8T",
+                                             "1/16",
+                                             "1/16D",
+                                             "1/16T",
+                                             "1/32",
+                                             "1/32D",
+                                             "1/32T",
+                                             "1/64",
+                                             "1/64D",
+                                             "1/64T",
+                                             "1/128",
+                                             "1/128D",
+                                             "1/128T" });
+
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        pid("midi_arp_rate"), "Arp Rate", arpRateChoices, 9)); // Default to 1/8
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         pid("midi_arp_pattern"), "Arp Pattern", arpPatternChoices, 0));

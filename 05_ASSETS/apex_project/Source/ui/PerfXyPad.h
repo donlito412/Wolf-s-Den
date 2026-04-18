@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 class WolfsDenAudioProcessor;
@@ -13,6 +14,10 @@ class PerfXyPad : public juce::Component, private juce::Timer
 public:
     explicit PerfXyPad(WolfsDenAudioProcessor& processor);
     ~PerfXyPad() override;
+
+    /** Called every timer tick with the current (x, y) position in [0..1].
+     *  Set this from ModPage to receive position updates while recording. */
+    std::function<void(float x, float y)> onPositionChanged;
 
     void paint(juce::Graphics& g) override;
     void resized() override;

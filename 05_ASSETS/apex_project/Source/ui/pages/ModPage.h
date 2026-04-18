@@ -68,6 +68,14 @@ private:
 
     std::unique_ptr<wolfsden::PerfXyPad> xyPad;
 
+    // XY recording
+    struct XyRecordEvent { juce::int64 timeMs; float x; float y; };
+    std::vector<XyRecordEvent> xyRecordBuffer;
+    bool xyRecording = false;
+    juce::int64 xyRecordStartMs = 0;
+    void startXyRecord();
+    juce::File stopXyRecordAndSave();
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ModPage)
 };
 

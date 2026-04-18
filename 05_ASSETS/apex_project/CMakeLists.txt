@@ -178,12 +178,10 @@ target_sources(
         Source/ui/theme/WolfsDenLookAndFeel.cpp
         Source/ui/chrome/TopBar.cpp
         Source/ui/chrome/BottomBar.cpp
-        Source/ui/pages/BrowsePage.cpp
+        Source/ui/pages/CompositionPage.cpp
         Source/ui/pages/SynthPage.cpp
         Source/ui/pages/WDSampleBrowserOverlay.cpp
-        Source/ui/pages/PerformPage.cpp
         Source/ui/pages/FxPage.cpp
-        Source/ui/pages/TheoryPage.cpp
         Source/ui/pages/ModPage.cpp
 )
 

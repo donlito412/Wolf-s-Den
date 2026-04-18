@@ -418,6 +418,13 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
         while (evIx < numEv && events[evIx].pos == i)
         {
             const auto& m = events[evIx].msg;
+            const int ch = m.getChannel();
+            if (ch != 1 && ch != 16 && ch != 0) // Listen to 1 (main), 16 (preview), or 0 (omni-ish)
+            {
+                ++evIx;
+                continue;
+            }
+
             if (m.isNoteOn() && m.getVelocity() > 0)
             {
                 const int note = m.getNoteNumber();

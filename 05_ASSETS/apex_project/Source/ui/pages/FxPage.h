@@ -18,8 +18,13 @@ namespace wolfsden::ui
  *   - 4 horizontal FX slots per rack
  *   - Each slot: FX name, On/Off LED toggle, wet/dry knob, expand for full params
  *   - Signal flow visual: Layer → Sum → Common → Master
+ *
+ * Drag-to-reorder: grab the ≡ handle on any slot row and drop it onto
+ * another row to swap their parameter values.
  */
-class FxPage : public juce::Component
+class FxPage : public juce::Component,
+               public juce::DragAndDropContainer,
+               public juce::DragAndDropTarget
 {
 public:
     explicit FxPage(WolfsDenAudioProcessor& proc);
@@ -27,10 +32,21 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseDrag(const juce::MouseEvent& e) override; // starts drag from a handle
+
+    // DragAndDropTarget overrides — handle slot reorder drops
+    bool isInterestedInDragSource(const SourceDetails&) override;
+    void itemDropped(const SourceDetails& details) override;
+    void itemDragEnter(const SourceDetails&) override {}
+    void itemDragExit(const SourceDetails&) override { dragHighlightSlot = -1; repaint(); }
+    void itemDragMove(const SourceDetails& details) override;
 
 private:
     void rebuildRack();
     void expandSlot(int slotIndex);
+    void swapSlotParameters(int slotA, int slotB);
+
+    int dragHighlightSlot = -1; // slot currently under drag cursor (-1 = none)
 
     WolfsDenAudioProcessor& processor;
     juce::AudioProcessorValueTreeState& apvts;
@@ -63,6 +79,7 @@ private:
 
     struct SlotRow
     {
+        juce::TextButton dragHandle { juce::CharPointer_UTF8("\xe2\x89\xa1") }; // ≡ drag grip
         juce::Label lab;
         juce::ComboBox type;
         juce::Label mixLabel;

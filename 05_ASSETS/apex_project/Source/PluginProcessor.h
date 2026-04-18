@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <vector>
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -52,7 +53,6 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
-    juce::UndoManager& getUndoManager() noexcept { return undoManager; }
     juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts; }
 
     /** Shared with on-screen MIDI keyboard(s); merged into processBlock MIDI stream. */
@@ -89,11 +89,22 @@ public:
      */
     bool loadPresetById (int presetId);
 
-    /**
-     * Step forward (+1) or backward (-1) through the currently filtered list in the UI,
-     * or the full list if no filter is active.
-     */
+    /** Step forward (+1) or backward (-1) through the loaded preset list.
+     *  filteredIndices, if non-empty, restricts cycling to that subset (indices into getPresetListings()). */
     void cyclePreset (int delta, const std::vector<int>& filteredIndices = {});
+
+    /** Step through factory presets only. */
+    void cycleFactoryPreset (int delta);
+
+    /** Preview a chord set (plays a short chord on ch 16, which bypasses chord/arp). */
+    void previewChordSet (int chordSetId);
+
+    /** Start recording incoming MIDI to an in-memory buffer (cleared on call). */
+    void startMidiCapture();
+
+    /** Stop recording and save the captured MIDI to a .mid file on the Desktop.
+     *  Returns the File on success, or an empty File if nothing was captured. */
+    juce::File stopMidiCaptureAndSave();
 
     /** The DB id of the last successfully loaded/saved preset (-1 = none). */
     int  getCurrentPresetId() const noexcept;
@@ -108,6 +119,12 @@ public:
     wolfsden::TheoryEngine& getTheoryEngine() noexcept { return theoryEngine; }
     const wolfsden::TheoryEngine& getTheoryEngine() const noexcept { return theoryEngine; }
     wolfsden::SynthEngine& getSynthEngine() noexcept { return synthEngine; }
+    wolfsden::MidiPipeline& getMidiPipeline() noexcept { return midiPipeline; }
+
+    /** Returns true while MIDI capture is recording. */
+    bool isMidiCaptureActive() const noexcept { return midiCaptureActive.load(std::memory_order_relaxed); }
+
+    juce::UndoManager& getUndoManager() noexcept { return undoManager; }
 
     wolfsden::WDSampleLibrary& getSampleLibrary() noexcept { return synthEngine.getSampleLibrary(); }
 
@@ -174,6 +191,20 @@ private:
     std::atomic<bool> isHostPlaying { false };
     std::atomic<int> midiActivityFlag { 0 }; // 1 = flash LED until UI consumes
     std::atomic<bool> pendingAllNotesOff { false }; // set by UI thread; consumed by audio thread
+
+    // -------------------------------------------------------------------------
+    // MIDI capture (records note/CC events to an in-memory ring, then exports MIDI)
+    // -------------------------------------------------------------------------
+    static constexpr int kMaxCaptureEvents = 4096;
+    struct MidiCaptureEvent
+    {
+        juce::int64 timeMs = 0;
+        uint8_t     data[4] = {};
+    };
+    std::array<MidiCaptureEvent, (size_t)kMaxCaptureEvents> midiCaptureBuffer {};
+    std::atomic<bool>        midiCaptureActive { false };
+    std::atomic<int>         midiCaptureFill   { 0 };
+    juce::int64              midiCaptureStartMs { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(WolfsDenAudioProcessor)
 };

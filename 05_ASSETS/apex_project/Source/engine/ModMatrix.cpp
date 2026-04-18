@@ -275,7 +275,10 @@ void ModMatrix::evaluate(float globalLfoBipolar,
             amt = -amt;
 
         const float sm = slotSmooth[(size_t)i].load(std::memory_order_relaxed);
-        const float a = juce::jlimit(0.02f, 1.f, 1.f - sm);
+        // Map 0-1 to something more useful for smoothing. 
+        // 0.05f is a reasonable default if sm is 0.
+        // We want sm=1.0 to be very slow (e.g. 0.0001) and sm=0.0 to be fast (e.g. 0.1).
+        const float a = juce::jlimit(0.0001f, 0.2f, 0.15f * std::pow(1.f - sm, 2.5f) + 0.0001f);
         smoothZ[(size_t)i] += (v * amt - smoothZ[(size_t)i]) * a;
         const float c = smoothZ[(size_t)i];
 

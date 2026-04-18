@@ -35,17 +35,14 @@ WolfsDenAudioProcessor::WolfsDenAudioProcessor()
 #endif
       ),
 #endif
-      apvts(*this, &undoManager, "Parameters", [this] {
-          const auto dbDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                                 .getChildFile("Wolf Productions")
-                                 .getChildFile("Wolf's Den");
-          (void)dbDir.createDirectory();
-          // We must ensure the database is initialized BEFORE makeParameterLayout runs
-          // so we can fetch chord/scale names for the UI.
-          theoryEngine.initialise(dbDir.getChildFile("theory.db"));
-          return wolfsden::makeParameterLayout(&theoryEngine);
-      }())
+    apvts(*this, &undoManager, "Parameters", wolfsden::makeParameterLayout())
 {
+    const auto dbDir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+                           .getChildFile("Wolf Productions")
+                           .getChildFile("Wolf's Den");
+    (void)dbDir.createDirectory();
+    theoryEngine.initialise(dbDir.getChildFile("theory.db"));
+
     juce::ignoreUnused(kWolfsDenBuildVerify);
     registerApvtsListeners();
 
@@ -59,7 +56,40 @@ WolfsDenAudioProcessor::WolfsDenAudioProcessor()
         getSynthEngine().getSampleLibrary().setBundleFactoryDirectory (factoryContentDir);
 
         // Seed the factory pack + 41 instrument presets on first launch (no-op thereafter)
-        theoryEngine.seedFactoryPresets (factoryContentDir);
+        // FORCE RE-SEED if the active factory samples are missing (e.g. moved bundle)
+        bool needsReseed = false;
+        const auto& factoryPresets = theoryEngine.getPresetListings();
+        int factoryCount = 0;
+        for (const auto& pr : factoryPresets) if (pr.isFactory) factoryCount++;
+        
+        if (factoryCount == 0) 
+        {
+            needsReseed = true;
+        }
+        else
+        {
+            // Check if the first factory sample actually exists
+            for (const auto& pr : factoryPresets)
+            {
+                if (pr.isFactory && !pr.samplePath.empty())
+                {
+                    if (!factoryContentDir.getChildFile(pr.samplePath).existsAsFile())
+                        needsReseed = true;
+                    break;
+                }
+            }
+        }
+
+        if (needsReseed)
+        {
+            DBG("Wolf's Den: Factory samples missing or DB empty. Re-seeding...");
+            theoryEngine.seedFactoryPresets (factoryContentDir);
+        }
+        else
+        {
+            // Still update the pack path in case it changed but files exist elsewhere
+            theoryEngine.seedFactoryPresets (factoryContentDir);
+        }
     }
 }
 
@@ -235,7 +265,32 @@ void WolfsDenAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce
         buffer.clear(i, 0, buffer.getNumSamples());
 
     theoryEngine.processMidi(midi);
-    midiPipeline.process(midi, n, getSampleRate(), getPlayHead(), theoryEngine, apvts);
+    midiPipeline.process(midi, n, getSampleRate(), getPlayHead(), theoryEngine, apvts, &midiKeyboardState);
+
+    // MIDI capture: record pipeline output to pre-allocated buffer (no heap alloc)
+    if (midiCaptureActive.load(std::memory_order_relaxed))
+    {
+        const juce::int64 nowMs = juce::Time::currentTimeMillis();
+        int fill = midiCaptureFill.load(std::memory_order_relaxed);
+        for (const auto& meta : midi)
+        {
+            if (fill >= kMaxCaptureEvents) break;
+            const auto& msg = meta.getMessage();
+            if (msg.isNoteOnOrOff() || msg.isController())
+            {
+                auto& ev = midiCaptureBuffer[(size_t)fill];
+                ev.timeMs = nowMs - midiCaptureStartMs;
+                const uint8_t* raw = msg.getRawData();
+                const int rawLen = msg.getRawDataSize();
+                ev.data[0] = rawLen > 0 ? raw[0] : 0;
+                ev.data[1] = rawLen > 1 ? raw[1] : 0;
+                ev.data[2] = rawLen > 2 ? raw[2] : 0;
+                ev.data[3] = 0;
+                ++fill;
+            }
+        }
+        midiCaptureFill.store(fill, std::memory_order_relaxed);
+    }
 
     // Grow-only: variable host block sizes would otherwise realloc every block → clicks.
     if (synthLayerBus.getNumChannels() < 8)
@@ -456,6 +511,8 @@ void WolfsDenAudioProcessor::applyFactoryPreset (const wolfsden::PresetListing& 
 {
     // Resolve the WAV path inside the bundle's Factory folder
     const juce::File wavFile = factoryContentDir.getChildFile (preset.samplePath.c_str());
+    
+    DBG("Wolf's Den: applyFactoryPreset - " << preset.name << " path: " << wavFile.getFullPathName());
 
     // Helper: set a RangedAudioParameter from its physical (unnormalized) value
     auto setPhysical = [this](const juce::String& id, float physVal)
@@ -464,10 +521,9 @@ void WolfsDenAudioProcessor::applyFactoryPreset (const wolfsden::PresetListing& 
             p->setValueNotifyingHost (p->convertTo0to1 (physVal));
     };
 
-    // Layer 0: switch oscillator mode to Sample (index 7)
-    // AudioParameterChoice stores choices 0-N; convertTo0to1(index) = index / (N-1)
-    if (auto* osc = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("layer0_osc_type")))
-        osc->setValueNotifyingHost (osc->convertTo0to1 (7));
+    // Always restore layer 0 volume to a sensible default so silence from a
+    // previously zeroed-out state doesn't persist across preset loads.
+    setPhysical ("layer0_volume", 0.75f);
 
     // Layer 0 ADSR — physical seconds / linear values
     setPhysical ("layer0_amp_attack",  preset.envAttack);
@@ -475,15 +531,28 @@ void WolfsDenAudioProcessor::applyFactoryPreset (const wolfsden::PresetListing& 
     setPhysical ("layer0_amp_sustain", preset.envSustain);
     setPhysical ("layer0_amp_release", preset.envRelease);
 
-    // Load the sample into layer 0
+    // Load the sample into layer 0 and switch to Sample oscillator mode.
+    // If the WAV file is missing (e.g. external drive not mounted), fall back to
+    // Sine mode so the preset at least produces audible output.
     if (wavFile.existsAsFile())
     {
+        DBG("Wolf's Den: Requesting sample load for " << preset.name);
+        // Switch oscillator mode to Sample (index 7)
+        if (auto* osc = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("layer0_osc_type")))
+            osc->setValueNotifyingHost (osc->convertTo0to1 (7));
         requestLayerSampleLoad (0,
                                 preset.id,
                                 wavFile.getFullPathName(),
                                 preset.rootNote,
                                 preset.loopEnabled,
                                 preset.oneShot);
+    }
+    else
+    {
+        DBG("Wolf's Den: WARNING - Factory sample not found, falling back to Sine: " << wavFile.getFullPathName());
+        // Fall back to Sine (index 0) so the preset is audible without the sample
+        if (auto* osc = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("layer0_osc_type")))
+            osc->setValueNotifyingHost (osc->convertTo0to1 (0));
     }
 }
 
@@ -544,6 +613,110 @@ int WolfsDenAudioProcessor::getCurrentPresetId() const noexcept
 {
     const juce::ScopedLock sl (customStateLock);
     return currentPresetId;
+}
+
+void WolfsDenAudioProcessor::cycleFactoryPreset (int delta)
+{
+    if (!theoryEngine.isDatabaseReady()) return;
+    const auto& fullList = theoryEngine.getPresetListings();
+    if (fullList.empty()) return;
+
+    // Build factory-only index list
+    std::vector<int> factoryIndices;
+    for (int i = 0; i < (int)fullList.size(); ++i)
+        if (fullList[(size_t)i].isFactory)
+            factoryIndices.push_back(i);
+
+    if (factoryIndices.empty()) return;
+    cyclePreset (delta, factoryIndices);
+}
+
+void WolfsDenAudioProcessor::previewChordSet (int chordSetId)
+{
+    const auto& sets = theoryEngine.getChordSetListings();
+    const auto it = std::find_if (sets.begin(), sets.end(),
+                                  [chordSetId](const wolfsden::ChordSetListing& s) { return s.id == chordSetId; });
+    if (it == sets.end()) return;
+
+    // Determine preview root from the chord set's scale, default to middle C (60)
+    int rootMidi = 60;
+    const auto& scales = theoryEngine.getScaleDefinitions();
+    if (it->scaleId > 0 && it->scaleId <= (int)scales.size())
+    {
+        // Use the root note implied by the scale definition (always play from C for simplicity)
+        // Scale root is 0=C by default — keep 60
+    }
+
+    // Stop any previous preview
+    // Channel 16 bypasses Chord Mode and Arp in MidiPipeline to avoid double-processing / feedback.
+    midiKeyboardState.allNotesOff (16);
+
+    // Use the chord set's actual root note (pitch class 0-11) and derive quality from mood.
+    // rootMidi starts at octave 4 (MIDI 48) anchored to the set's pitch class.
+    rootMidi = 48 + juce::jlimit (0, 11, it->rootNote);
+
+    // Choose Major or Minor based on mood string
+    const juce::String mood = juce::String (it->mood).toLowerCase();
+    const bool isDark = mood.containsAnyOf ("minor sad dark somber melancholic");
+    const bool isDim  = mood.containsAnyOf ("tense dissonant diminished");
+    static const int kMaj[] = { 0, 4, 7 };
+    static const int kMin[] = { 0, 3, 7 };
+    static const int kDim[] = { 0, 3, 6 };
+    const int* iv = isDim ? kDim : (isDark ? kMin : kMaj);
+    const int  nv = 3;
+
+    for (int i = 0; i < nv; ++i)
+        midiKeyboardState.noteOn (16, juce::jlimit(0, 127, rootMidi + iv[i]), 0.75f);
+
+    // Release after 1.2 seconds
+    juce::Timer::callAfterDelay (1200, [this]
+    {
+        midiKeyboardState.allNotesOff (16);
+    });
+}
+
+void WolfsDenAudioProcessor::startMidiCapture()
+{
+    midiCaptureFill.store (0, std::memory_order_relaxed);
+    midiCaptureStartMs = juce::Time::currentTimeMillis();
+    midiCaptureActive.store (true, std::memory_order_release);
+}
+
+juce::File WolfsDenAudioProcessor::stopMidiCaptureAndSave()
+{
+    midiCaptureActive.store (false, std::memory_order_relaxed);
+    const int count = midiCaptureFill.load (std::memory_order_relaxed);
+    if (count == 0)
+        return {};
+
+    juce::MidiFile mf;
+    mf.setTicksPerQuarterNote (960);
+
+    juce::MidiMessageSequence seq;
+    constexpr double kBPM = 120.0;
+    constexpr double kTicksPerSec = (kBPM / 60.0) * 960.0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto& ev = midiCaptureBuffer[(size_t)i];
+        const double ticks = (double)ev.timeMs * 0.001 * kTicksPerSec;
+        juce::MidiMessage msg (ev.data[0], ev.data[1], ev.data[2]);
+        seq.addEvent (msg, ticks);
+    }
+    seq.updateMatchedPairs();
+    mf.addTrack (seq);
+
+    // Write to Desktop
+    const auto desktop = juce::File::getSpecialLocation (juce::File::userDesktopDirectory);
+    const auto file = desktop.getNonexistentChildFile ("WolfsDen_MIDI_Capture", ".mid");
+    if (auto out = file.createOutputStream())
+    {
+        mf.writeTo (*out);
+        out->flush();
+    }
+
+    file.revealToUser();
+    return file;
 }
 
 void WolfsDenAudioProcessor::setLastEditorBounds(int width, int height)

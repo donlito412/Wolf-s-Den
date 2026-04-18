@@ -155,6 +155,24 @@ constexpr int kNumChordTypesUi = 15;
 
 } // namespace
 
+void MidiPipeline::setChordModeEnabled(bool enabled) noexcept
+{
+    if (ptrs.chordMode)
+        ptrs.chordMode->store(enabled ? 1.f : 0.f, std::memory_order_relaxed);
+}
+
+void MidiPipeline::setKeysLockMode(int modeIndex) noexcept
+{
+    if (ptrs.keysLockMode)
+        ptrs.keysLockMode->store((float)modeIndex, std::memory_order_relaxed);
+}
+
+void MidiPipeline::setTheoryVoiceLeadingEnabled(bool enabled) noexcept
+{
+    if (ptrs.voiceLeading)
+        ptrs.voiceLeading->store(enabled ? 1.f : 0.f, std::memory_order_relaxed);
+}
+
 void MidiPipeline::prepare(double sampleRate, int maxBlock, juce::AudioProcessorValueTreeState& apvts)
 {
     juce::ignoreUnused(sampleRate, maxBlock);
@@ -164,7 +182,7 @@ void MidiPipeline::prepare(double sampleRate, int maxBlock, juce::AudioProcessor
 
 void MidiPipeline::bindPointers(juce::AudioProcessorValueTreeState& apvts)
 {
-    arpRateParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_rate"));
+    arpRateParam = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_rate"));
     arpSwingParam = dynamic_cast<juce::AudioParameterFloat*>(apvts.getParameter("midi_arp_swing"));
     arpPatternChoice = dynamic_cast<juce::AudioParameterChoice*>(apvts.getParameter("midi_arp_pattern"));
     ptrs.keysLockMode = apvts.getRawParameterValue("midi_keys_lock_mode");
@@ -318,15 +336,36 @@ bool MidiPipeline::readArpOn() const noexcept
 
 float MidiPipeline::readArpRate() const noexcept
 {
-    if (!ptrs.arpRate)
-        return 4.f;
-    const float v = readAP(ptrs.arpRate, 4.f);
+    // midi_arp_rate is an AudioParameterChoice with 23 entries:
+    //   0="1/1"  1="1/1D"  2="1/1T"  3="1/2"  4="1/2D"  5="1/2T"
+    //   6="1/4"  7="1/4D"  8="1/4T"  9="1/8"  10="1/8D" 11="1/8T"
+    //  12="1/16" 13="1/16D" 14="1/16T" 15="1/32" 16="1/32D" 17="1/32T"
+    //  18="1/64" 19="1/64D" 20="1/64T" 21="1/128" 22="1/128D" 23="1/128T"
+    // Each group of 3 is: straight, dotted, triplet
+    // Dotted = longer note → fewer steps/beat (÷1.5)
+    // Triplet = shorter note → more steps/beat (×1.5)
+    static constexpr float kRateTable[] = {
+        0.25f,   0.25f / 1.5f,  0.25f * 1.5f,   // 1/1, 1/1D, 1/1T
+        0.5f,    0.5f  / 1.5f,  0.5f  * 1.5f,   // 1/2, 1/2D, 1/2T
+        1.f,     1.f   / 1.5f,  1.f   * 1.5f,   // 1/4, 1/4D, 1/4T
+        2.f,     2.f   / 1.5f,  2.f   * 1.5f,   // 1/8, 1/8D, 1/8T
+        4.f,     4.f   / 1.5f,  4.f   * 1.5f,   // 1/16, 1/16D, 1/16T
+        8.f,     8.f   / 1.5f,  8.f   * 1.5f,   // 1/32, 1/32D, 1/32T
+        16.f,    16.f  / 1.5f,  16.f  * 1.5f,   // 1/64, 1/64D, 1/64T
+        32.f,    32.f  / 1.5f,  32.f  * 1.5f,   // 1/128, 1/128D, 1/128T
+    };
+    static constexpr int kNumRates = (int)(sizeof(kRateTable) / sizeof(kRateTable[0]));
+
     if (arpRateParam != nullptr)
     {
-        const auto r = arpRateParam->getNormalisableRange();
-        return juce::jlimit(r.start, r.end, v);
+        const int idx = juce::jlimit(0, kNumRates - 1, arpRateParam->getIndex());
+        return kRateTable[idx];
     }
-    return juce::jlimit(0.25f, 32.f, v);
+    // Fallback: read raw atomic and interpret as choice index via normalized value
+    if (!ptrs.arpRate)
+        return 2.f; // default 1/8
+    const int idx = readChoice(ptrs.arpRate, kNumRates, 9);
+    return kRateTable[idx];
 }
 
 MidiPipeline::ArpPattern MidiPipeline::readArpPattern() const noexcept
@@ -455,30 +494,6 @@ void MidiPipeline::freeChordMap(int idx) noexcept
         chordMaps[(size_t)idx] = {};
 }
 
-void MidiPipeline::removeNoteFromArpPool(uint8_t note) noexcept
-{
-    uint8_t newPool[kMaxPool];
-    uint8_t n = 0;
-    for (uint8_t i = 0; i < arpPoolCount; ++i)
-    {
-        if (arpPool[(size_t)i] != note)
-            newPool[(size_t)n++] = arpPool[(size_t)i];
-    }
-    for (uint8_t i = 0; i < n; ++i)
-        arpPool[(size_t)i] = newPool[(size_t)i];
-    arpPoolCount = n;
-
-    uint8_t newOrd[kMaxPool];
-    uint8_t m = 0;
-    for (uint8_t i = 0; i < pressCount; ++i)
-    {
-        if (pressOrder[(size_t)i] != note)
-            newOrd[(size_t)m++] = pressOrder[(size_t)i];
-    }
-    for (uint8_t i = 0; i < m; ++i)
-        pressOrder[(size_t)i] = newOrd[(size_t)i];
-    pressCount = m;
-}
 
 void MidiPipeline::addNoteToArpPool(uint8_t note) noexcept
 {
@@ -530,7 +545,8 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
                                 double stepLenSamples,
                                 double gateScaleMul,
                                 double sampleRate,
-                                bool advanceSequencer) noexcept
+                                bool advanceSequencer,
+                                juce::MidiKeyboardState* keyboardState) noexcept
 {
     juce::ignoreUnused(sampleRate);
     const double stepCap = juce::jmax(1.0, stepLenSamples);
@@ -662,7 +678,8 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                            double sampleRate,
                            juce::AudioPlayHead* playHead,
                            const TheoryEngine& theory,
-                           juce::AudioProcessorValueTreeState& apvts) noexcept
+                           juce::AudioProcessorValueTreeState& apvts,
+                           juce::MidiKeyboardState* keyboardState) noexcept
 {
     if (!pointersBound)
         bindPointers(apvts);
@@ -780,29 +797,8 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
         {
             lastChordScaleId = cm.chordId;
             lastChordScaleRoot = cm.rootNote;
-            
-            // Rebuild table using the scale associated with the detected chord root
-            const auto& scales = theory.getScaleDefinitions();
-            const int* iv = nullptr;
-            int nIv = 0;
             static constexpr int kMajor[] = { 0, 2, 4, 5, 7, 9, 11 };
-            
-            if (theory.isDatabaseReady() && !scales.empty())
-            {
-                // For now we default to the active scale type but rooted at the chord root, 
-                // or if we had a specific chord-scale mapping we'd use that.
-                const int st = juce::jlimit(0, (int)scales.size() - 1, theory.getActiveScaleType());
-                iv = scales[(size_t)st].intervals.data();
-                nIv = (int)scales[(size_t)st].intervals.size();
-            }
-            
-            if (iv == nullptr || nIv == 0)
-            {
-                iv = kMajor;
-                nIv = 7;
-            }
-            
-            buildScaleLookupTable(chordScaleTable, cm.rootNote, iv, nIv);
+            buildScaleLookupTable(chordScaleTable, cm.rootNote, kMajor, 7);
         }
     }
     else if (keysMode == 4)
@@ -853,6 +849,14 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
             const auto msg = inEv[inIx].m;
             ++inIx;
 
+            // Channel 16 is used for UI preview (composition page chord audition).
+            // Pass these through untouched — don't route through keysLock / chord / arp.
+            if (msg.getChannel() == 16)
+            {
+                out.addEvent(msg, s);
+                continue;
+            }
+
             if (msg.isNoteOn() && msg.getVelocity() > 0)
             {
                 const int raw = msg.getNoteNumber();
@@ -865,23 +869,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
                 if (chordOn)
                 {
                     const int tidx = readChordTypeIndex();
-                    const auto& defs = theory.getChordDefinitions();
-                    const std::vector<int>* chordIv = nullptr;
-                    std::unique_ptr<std::vector<int>> allocatedChordIv;
-        
-                    if (theory.isDatabaseReady() && tidx >= 0 && tidx < (int)defs.size())
-                    {
-                        chordIv = &defs[(size_t)tidx].intervals;
-                    }
-                    else if (tidx >= 0 && tidx < kNumChordTypesUi)
-                    {
-                        allocatedChordIv = std::make_unique<std::vector<int>>(kChordTypes[tidx].iv, kChordTypes[tidx].iv + kChordTypes[tidx].n);
-                        chordIv = allocatedChordIv.get();
-                    }
-
-                    if (chordIv == nullptr)
-                        continue;
-
+                    const ChordTypeData& cd = kChordTypes[juce::jmin(tidx, kNumChordTypesUi - 1)];
                     int chordRootMidi = *locked;
                     const int anch = readChordRootAnchor();
                     if (anch > 0)
@@ -894,34 +882,7 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
 
                     std::array<uint8_t, kMaxChordTones> notes {};
                     uint8_t nBuilt = 0;
-        
-                    // Use TheoryEngine's voice leading if enabled
-                    bool useVoiceLeading = false;
-                    if (auto* p = apvts.getRawParameterValue("theory_voice_leading"))
-                        useVoiceLeading = p->load(std::memory_order_relaxed) > 0.5f;
-
-                    if (useVoiceLeading && theory.isDatabaseReady())
-                    {
-                        // Find what's currently playing to minimize movement
-                        std::vector<int> currentNotes;
-                        for (const auto& m : chordMaps)
-                            if (m.used)
-                            {
-                                for (uint8_t i = 0; i < m.nOut; ++i)
-                                    currentNotes.push_back((int)m.outs[i]);
-                                break;
-                            }
-
-                        auto vr = theory.computeVoiceLeading(currentNotes, tidx, chordRootMidi % 12);
-                        for (size_t i = 0; i < vr.notes.size() && i < kMaxChordTones; ++i)
-                        {
-                            if (vr.notes[i] > 0)
-                                notes[nBuilt++] = (uint8_t)vr.notes[i];
-                        }
-                    }
-        
-                    if (nBuilt == 0 && chordIv != nullptr) // Default or Fallback
-                        buildChordNotes(chordRootMidi, chordIv->data(), (int)chordIv->size(), readChordInversion(), notes, nBuilt);
+                    buildChordNotes(chordRootMidi, cd.iv, cd.n, readChordInversion(), notes, nBuilt);
 
                     const int dens = readChordDensity();
                     const int cap = juce::jmin((int)nBuilt, juce::jmax(1, 3 + dens));

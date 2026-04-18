@@ -402,16 +402,50 @@ void FxPage::paint(juce::Graphics& g)
         g.drawText(flowLabels[(size_t)i], s, juce::Justification::centred);
     }
 
-    // Slot panel backgrounds
-    auto slotsR = getLocalBounds().reduced(12);
-    slotsR.removeFromTop(28 + 32 + 24 + 8 + 86);
+    // Slot panel backgrounds — derive bounds from actual laid-out components
     for (int i = 0; i < (int)slots.size(); ++i)
     {
-        auto slotBounds = slots[(size_t)i]->lab.getBounds().withRight(getWidth() - 12).withHeight(
-            expandedSlot == i ? 126 : 66);
+        auto labBounds = slots[(size_t)i]->lab.getBounds();
+        auto slotBounds = labBounds.withRight(getWidth() - 12);
+        if (expandedSlot == i && slots[(size_t)i]->panel != nullptr)
+            slotBounds = slotBounds.getUnion(slots[(size_t)i]->panel->getBounds());
+        else
+            slotBounds = slotBounds.withBottom(slots[(size_t)i]->mix.getBounds().getBottom() + 4);
         g.setColour(Theme::backgroundMid().withAlpha(0.3f));
         g.fillRoundedRectangle(slotBounds.toFloat().reduced(2.f), 6.f);
     }
+}
+
+void FxPage::mouseDrag(const juce::MouseEvent& e)
+{
+    juce::ignoreUnused(e);
+    // TODO: implement drag-to-reorder from slot handle
+}
+
+bool FxPage::isInterestedInDragSource(const SourceDetails& details)
+{
+    juce::ignoreUnused(details);
+    return true;
+}
+
+void FxPage::itemDragMove(const SourceDetails& details)
+{
+    juce::ignoreUnused(details);
+    dragHighlightSlot = -1;
+    repaint();
+}
+
+void FxPage::itemDropped(const SourceDetails& details)
+{
+    juce::ignoreUnused(details);
+    dragHighlightSlot = -1;
+    repaint();
+}
+
+void FxPage::swapSlotParameters(int slotA, int slotB)
+{
+    juce::ignoreUnused(slotA, slotB);
+    // TODO: implement parameter swap between slots
 }
 
 void FxPage::resized()
@@ -419,18 +453,21 @@ void FxPage::resized()
     auto r = getLocalBounds().reduced(12);
     r.removeFromTop(28);
 
+    const int availH = r.getHeight();
+    const bool compact = availH < 420;
+
     // Rack tabs
-    auto tabRow = r.removeFromTop(32);
+    auto tabRow = r.removeFromTop(compact ? 28 : 32);
     const int tabW = juce::jmin(88, tabRow.getWidth() / 6);
     for (int i = 0; i < 6; ++i)
         rackTab[(size_t)i].setBounds(tabRow.removeFromLeft(tabW).reduced(2, 2));
 
-    r.removeFromTop(24 + 8); // signal flow + gap
+    r.removeFromTop(compact ? 20 : 32); // signal flow + gap
 
     // Legacy mix knobs (shown on Common rack)
-    constexpr int kMixCap = 12;
-    auto legRow = r.removeFromTop(86);
-    const int qw = juce::jmax(72, legRow.getWidth() / 4);
+    constexpr int kMixCap = 14;
+    auto legRow = r.removeFromTop(compact ? 90 : 120);
+    const int qw = juce::jmax(90, legRow.getWidth() / 4);
     {
         auto c = legRow.removeFromLeft(qw).reduced(4, 2);
         lblRevMix.setBounds(c.removeFromTop(kMixCap));
@@ -454,8 +491,8 @@ void FxPage::resized()
     r.removeFromTop(8);
 
     // FX slots
-    constexpr int kCollapsedH   = 66;
-    constexpr int kExpandedH    = 160;  // header (60) + params panel (100)
+    const int kCollapsedH   = compact ? 44 : 66;
+    const int kExpandedH    = compact ? 110 : 160;  // header + params panel
 
     for (int i = 0; i < (int)slots.size(); ++i)
     {
@@ -465,13 +502,15 @@ void FxPage::resized()
 
         // Header row
         auto top = slotR.removeFromTop(kCollapsedH);
-        slots[(size_t)i]->onOff.setBounds(top.removeFromLeft(40).reduced(4, 12));
-        slots[(size_t)i]->lab.setBounds(top.removeFromLeft(60).reduced(2, 14));
-        slots[(size_t)i]->type.setBounds(top.removeFromLeft(juce::jmax(220, top.getWidth() * 55 / 100)).reduced(2, 8));
-        slots[(size_t)i]->expandBtn.setBounds(top.removeFromRight(36).reduced(4, 12));
+        const int vPad = compact ? 6 : 12;
+        const int vPad2 = compact ? 4 : 8;
+        slots[(size_t)i]->onOff.setBounds(top.removeFromLeft(40).reduced(4, vPad));
+        slots[(size_t)i]->lab.setBounds(top.removeFromLeft(60).reduced(2, vPad + 2));
+        slots[(size_t)i]->type.setBounds(top.removeFromLeft(juce::jmax(220, top.getWidth() * 55 / 100)).reduced(2, vPad2));
+        slots[(size_t)i]->expandBtn.setBounds(top.removeFromRight(36).reduced(4, vPad));
         auto mixCol = top.reduced(4, 2);
-        slots[(size_t)i]->mixLabel.setBounds(mixCol.removeFromTop(11));
-        slots[(size_t)i]->mix.setBounds(mixCol.removeFromTop(juce::jmax(22, mixCol.getHeight())));
+        slots[(size_t)i]->mixLabel.setBounds(mixCol.removeFromTop(compact ? 9 : 11));
+        slots[(size_t)i]->mix.setBounds(mixCol.removeFromTop(juce::jmax(18, mixCol.getHeight())));
 
         // Expanded panel
         if (slots[(size_t)i]->panel)

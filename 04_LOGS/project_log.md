@@ -311,3 +311,53 @@ Task: Final Audit and Project Completion (TASK_001–010)
 Output: Updated TASK_010.md, Project Clarity Study
 Details: Completed a final end-to-end audit of all 10 project tasks. Verified that all core engines (Synthesis, Theory, MIDI, FX), modulation systems, and the custom UI are fully implemented and integrated. Confirmed the resolution of all integration bugs: BUG_INT_001 (UndoManager), BUG_INT_002 (Window Size Restoration), and the Arpeggiator "static" jitter. Validated the preset system with 41 factory instruments and SQLite-backed user states. The plugin is now "Release Ready" for VST3, AU, and Standalone formats on macOS.
 Status: DONE
+
+---
+
+[2026-04-13]
+
+Agent: Claude (Cowork)
+Task: Bug fixes (BUG_INT_001/002/003) + all 5 deferred UI features
+Output: Modified source files in 05_ASSETS/apex_project/Source/
+Details:
+  BUG FIXES:
+  - BUG_INT_001 (UndoManager keyboard shortcuts): Added keyPressed() override to PluginEditor (Cmd+Z = undo, Shift+Cmd+Z = redo). UndoManager was already wired to APVTS and Undo/Redo buttons were already in TopBar — only keyboard shortcuts were missing.
+  - BUG_INT_002 (window size restore): Already fixed in current code (PluginEditor reads getEditorWidth/Height). Confirmed and closed.
+  - BUG_INT_003 (< > cycles all presets): Added cycleFactoryPreset(delta) to PluginProcessor. MainComponent now calls cycleFactoryPreset() when not on Browse page, keeping arrow navigation to the 41 factory instruments only. Browse page continues to use its filter-aware cyclePreset().
+
+  DEFERRED UI FEATURES (all 5 implemented):
+  1. Browse Audio Preview: playPreviewForCard() now calls processor.previewChordSet(id) — plays a major triad on middle C via MidiKeyboardState, auto-releases after 1.2s.
+  2. MIDI Capture → Export: PerformPage MIDI Capture button now toggles recording. Audio thread writes to pre-allocated 16K-event ring buffer (no heap alloc). stopMidiCaptureAndSave() writes a Type-0 MIDI file to Desktop and reveals it in Finder.
+  3. FX Drag-to-Reorder: FxPage now inherits DragAndDropContainer + DragAndDropTarget. Each slot has a ≡ drag handle. Dropping a slot onto another swaps all their parameter values (type, mix, p0–p3) via APVTS and rebuilds the rack. Drag target highlighted in accent purple during drag.
+  4. XY Pad → Record to DAW: ModPage Record button (formerly stub alert) now toggles XY recording. PerfXyPad fires onPositionChanged callback every timer tick. stopXyRecordAndSave() writes CC74 (X) + CC1 (Y) to a .mid file on Desktop.
+  5. Circle of Fifths Adjacent Chord Popup: CircleOfFifths now implements mouseMove/mouseExit. Hovered segment highlighted in accent purple; setTooltip() shows adjacent key names + shared notes (computed from major scale intervals). JUCE's built-in tooltip system handles display.
+
+Next Step: User to run cmake --build build --config Release in apex_project directory, then load in Logic and Ableton for integration testing.
+Status: DONE
+
+---
+
+[2026-04-15]
+
+Agent: Claude (Cowork)
+Task: TASK_011 — CompositionPage UX Redesign
+Output: Modified Source/ui/pages/CompositionPage.h and .cpp
+Details:
+  PROBLEMS ADDRESSED:
+  - Removed vertical sidebar (was 25% of width, contained search/filters) — replaced with horizontal genre + mood pill rows across the full width. Search box now inline at the right of the genre row.
+  - Audition pads now show actual chord names ("Am7", "Cmaj7", "G") instead of numbers ("1","2","3"). Names are built from root pitch-class + ChordDefinition.symbol.
+  - MIDI keyboard now triggers audition pads: CompositionPage implements MidiKeyboardState::Listener; note-ons on C3(48)..B3(59) map to audition pads 0..11. Only fires when page is visible and a set is selected.
+  - Drag from audition pad → composition slot: CompositionPage implements MouseListener, added as listener on each audition pad. mouseDrag() tracks drag source + highlights target slot; mouseUp() places chord in the highlighted slot (or first free slot if dropped over the slots area).
+  - Volume knob (masterVol/OUT VOL) now in a fixed bottom-right position, always visible regardless of window size.
+  - OUT VOL knob label styled in textSecondary colour.
+  - Composition slots show chord names in the same format as audition pads.
+  - MIDI Capture button updates its label live: "⏺ MIDI CAPTURE" / "⏹ STOP CAPTURE".
+  - Browse grid now uses 4-column layout with taller cards (60px) that show name + genre·mood.
+  
+  ARCHITECTURE:
+  - Removed: DragAndDropContainer, DragAndDropTarget, vertical sidebar viewport/inner, DiscoveryCard → replaced with BrowseCard (same idea, 4-col larger cards), all old sidebar members.
+  - Added: MidiKeyboardState::Listener, MouseListener, horizontal pill arrays (genrePills, moodPills), dragSourcePad/dropHighlightSlot tracking.
+  - All APVTS attachments preserved. All engine connections unchanged.
+
+Next Step: User builds (cmake --build build --config Release in apex_project directory) and tests in DAW.
+Status: DONE

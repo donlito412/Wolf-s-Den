@@ -1,6 +1,7 @@
 #include "TopBar.h"
 
 #include "../../PluginProcessor.h"
+#include <map>
 
 namespace wolfsden::ui
 {
@@ -20,30 +21,27 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
         addAndMakeVisible(t);
     }
 
-    tabBrowse.onClick = [this] { tabClicked(0); };
-    tabSynth.onClick = [this] { tabClicked(1); };
-    tabTheory.onClick = [this] { tabClicked(2); };
-    tabPerform.onClick = [this] { tabClicked(3); };
-    tabFx.onClick = [this] { tabClicked(4); };
-    tabMod.onClick = [this] { tabClicked(5); };
+    tabSynth.onClick       = [this] { tabClicked(0); };
+    tabComposition.onClick = [this] { tabClicked(1); };
+    tabFx.onClick          = [this] { tabClicked(2); };
+    tabMod.onClick         = [this] { tabClicked(3); };
 
     presetLabel.setJustificationType(juce::Justification::centred);
     presetLabel.setFont(Theme::fontValue());
     presetLabel.setColour(juce::Label::textColourId, Theme::textPrimary());
+    presetLabel.setInterceptsMouseClicks(false, false);
     addAndMakeVisible(presetLabel);
 
     addAndMakeVisible(presetPrev);
     addAndMakeVisible(presetNext);
     presetPrev.onClick = [this] {
-        if (onPresetNavigateRequested)
-            onPresetNavigateRequested(-1);
+        processor.cyclePreset (-1);
         refreshPresetLabel();
         if (onPresetNavigate)
             onPresetNavigate();
     };
     presetNext.onClick = [this] {
-        if (onPresetNavigateRequested)
-            onPresetNavigateRequested(1);
+        processor.cyclePreset (+1);
         refreshPresetLabel();
         if (onPresetNavigate)
             onPresetNavigate();
@@ -57,22 +55,12 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
                                                 "OK");
     };
 
-    addAndMakeVisible(undoBtn);
-    undoBtn.onClick = [this] {
-        processor.getUndoManager().undo();
-    };
-
-    addAndMakeVisible(redoBtn);
-    redoBtn.onClick = [this] {
-        processor.getUndoManager().redo();
-    };
-
     cpuLabel.setFont(Theme::fontLabel());
     cpuLabel.setColour(juce::Label::textColourId, Theme::textSecondary());
     cpuLabel.setJustificationType(juce::Justification::centredRight);
     addAndMakeVisible(cpuLabel);
 
-    setActivePage(1);
+    setActivePage(0);
     refreshPresetLabel();
 }
 
@@ -94,7 +82,7 @@ void TopBar::refreshPresetLabel()
 
 void TopBar::setActivePage(int index)
 {
-    activePage = juce::jlimit(0, 5, index);
+    activePage = juce::jlimit(0, 3, index);
     repaint();
 }
 
@@ -120,7 +108,7 @@ void TopBar::paint(juce::Graphics& g)
     g.setColour(Theme::textDisabled().withAlpha(0.65f));
     g.drawLine(0.f, (float)getHeight() - 1.f, (float)getWidth(), (float)getHeight() - 1.f, 1.f);
 
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 4; ++i)
     {
         if (i == activePage)
         {
@@ -137,8 +125,8 @@ void TopBar::resized()
     logoLabel.setBounds(r.removeFromLeft(100));
     r.removeFromLeft(12);
 
-    const int tabW = juce::jlimit(72, 100, r.getWidth() / 10);
-    for (int i = 0; i < 6; ++i)
+    const int tabW = juce::jlimit(72, 100, r.getWidth() / 8);
+    for (int i = 0; i < 4; ++i)
         tabs[(size_t)i]->setBounds(r.removeFromLeft(tabW).reduced(2, 0));
 
     r.removeFromLeft(16);
@@ -149,8 +137,45 @@ void TopBar::resized()
 
     cpuLabel.setBounds(r.removeFromRight(72));
     settingsBtn.setBounds(r.removeFromRight(88));
-    redoBtn.setBounds(r.removeFromRight(60));
-    undoBtn.setBounds(r.removeFromRight(60));
+}
+
+void TopBar::mouseDown(const juce::MouseEvent& e)
+{
+    if (presetLabel.getBounds().contains(e.getPosition()))
+        showPresetMenu();
+}
+
+void TopBar::showPresetMenu()
+{
+    const auto& listings = processor.getTheoryEngine().getPresetListings();
+    if (listings.empty())
+        return;
+
+    juce::PopupMenu menu;
+    const int currentId = processor.getCurrentPresetId();
+
+    // Group presets by category into submenus
+    std::map<juce::String, juce::PopupMenu> categoryMenus;
+    for (int i = 0; i < (int)listings.size(); ++i)
+    {
+        juce::String cat(listings[(size_t)i].category);
+        if (cat.isEmpty()) cat = "Other";
+        categoryMenus[cat].addItem(i + 1, juce::String(listings[(size_t)i].name), true, listings[(size_t)i].id == currentId);
+    }
+    for (auto& [cat, sub] : categoryMenus)
+        menu.addSubMenu(cat, sub);
+
+    menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&presetLabel),
+                       [this](int result)
+                       {
+                           if (result > 0)
+                           {
+                               processor.loadPresetById(processor.getTheoryEngine().getPresetListings()[(size_t)(result - 1)].id);
+                               refreshPresetLabel();
+                               if (onPresetNavigate)
+                                   onPresetNavigate();
+                           }
+                       });
 }
 
 } // namespace wolfsden::ui

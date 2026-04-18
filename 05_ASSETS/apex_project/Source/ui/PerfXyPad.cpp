@@ -99,6 +99,8 @@ void PerfXyPad::timerCallback()
     }
 
     pushPosition();
+    if (onPositionChanged)
+        onPositionChanged(posX, posY);
     repaint();
 }
 

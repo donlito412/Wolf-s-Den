@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.21)
 # TASK_002 deliverable: Tests/ hooked to CTest (ADD §9.5 WolfsDenTests pattern; minimal smoke).
 enable_testing()
 
-add_executable(WolfsDenTests TheoryEngineTest.cpp)
+add_executable(WolfsDenTests SmokeTest.cpp)
 target_compile_features(WolfsDenTests PRIVATE cxx_std_17)
 target_compile_definitions(WolfsDenTests PRIVATE JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1)
 target_include_directories(WolfsDenTests PRIVATE ../Source)

@@ -2,6 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/05_ASSETS/apex_project/build3/_deps/juce-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/05_ASSETS/apex_project/build/_deps/juce-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/05_ASSETS/apex_project/build_fix/_deps/juce-src" vcs="Git" />
   </component>
 </project>

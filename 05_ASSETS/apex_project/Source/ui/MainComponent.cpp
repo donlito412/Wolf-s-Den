@@ -23,10 +23,8 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
     : processor(p)
     , topBar(p)
     , bottomBar(p)
-    , pageBrowse(p)
     , pageSynth(p)
-    , pageTheory(p)
-    , pagePerform(p)
+    , pageComposition(p)
     , pageFx(p)
     , pageMod(p)
 {
@@ -49,12 +47,10 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
 
     addAndMakeVisible(bottomBar);
 
-    pages[0] = &pageBrowse;
-    pages[1] = &pageSynth;
-    pages[2] = &pageTheory;
-    pages[3] = &pagePerform;
-    pages[4] = &pageFx;
-    pages[5] = &pageMod;
+    pages[0] = &pageSynth;
+    pages[1] = &pageComposition;
+    pages[2] = &pageFx;
+    pages[3] = &pageMod;
 
     for (auto* pg : pages)
     {
@@ -64,14 +60,7 @@ MainComponent::MainComponent(WolfsDenAudioProcessor& p)
 
     topBar.onSelectPage = [this](int i) { showPage(i); };
     topBar.onPresetNavigateRequested = [this](int delta) {
-        if (currentPage == 0) // Browse page
-            processor.cyclePreset(delta, pageBrowse.getFilteredPresetIndices());
-        else
-            processor.cyclePreset(delta);
-    };
-    pageBrowse.onPresetOrSelectionChanged = [this] { topBar.refreshPresetLabel(); };
-    topBar.onPresetNavigate = [this] {
-        pageBrowse.syncPresetSelectionFromProcessor();
+        processor.cycleFactoryPreset(delta);
         topBar.refreshPresetLabel();
     };
     showPage(0);
@@ -86,14 +75,14 @@ MainComponent::~MainComponent()
 
 void MainComponent::showPage(int index)
 {
-    const int next = juce::jlimit(0, 5, index);
+    const int next = juce::jlimit(0, 3, index);
     topBar.setActivePage(next);
 
     if (!pageFirstShowDone)
     {
         pageFirstShowDone = true;
         currentPage = next;
-        for (int k = 0; k < 6; ++k)
+        for (int k = 0; k < 4; ++k)
         {
             pages[(size_t)k]->setVisible(k == currentPage);
             pages[(size_t)k]->setAlpha(1.f);
@@ -180,7 +169,7 @@ void MainComponent::resized()
     bottomBar.setBounds(r.removeFromBottom(44));
     if (midiKeyboard != nullptr)
         midiKeyboard->setBounds(r.removeFromBottom(68));
-    for (int k = 0; k < 6; ++k)
+    for (int k = 0; k < 4; ++k)
         pages[(size_t)k]->setBounds(r);
 }
 

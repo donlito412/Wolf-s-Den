@@ -2,12 +2,10 @@
 
 #include "chrome/BottomBar.h"
 #include "chrome/TopBar.h"
-#include "pages/BrowsePage.h"
+#include "pages/CompositionPage.h"
 #include "pages/FxPage.h"
 #include "pages/ModPage.h"
-#include "pages/PerformPage.h"
 #include "pages/SynthPage.h"
-#include "pages/TheoryPage.h"
 #include "theme/WolfsDenLookAndFeel.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -47,15 +45,13 @@ private:
     std::unique_ptr<juce::MidiKeyboardComponent> midiKeyboard;
     BottomBar bottomBar;
 
-    BrowsePage pageBrowse;
     SynthPage pageSynth;
-    TheoryPage pageTheory;
-    PerformPage pagePerform;
+    CompositionPage pageComposition;
     FxPage pageFx;
     ModPage pageMod;
 
-    juce::Component* pages[6] {};
-    int currentPage = 1;
+    juce::Component* pages[4] {};
+    int currentPage = 0;
 
     bool pageFirstShowDone = false;
     PageFade pageFadePhase = PageFade::idle;

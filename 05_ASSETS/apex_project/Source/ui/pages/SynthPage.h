@@ -1,7 +1,6 @@
 #pragma once
 
 #include "../theme/UITheme.h"
-#include "WDSampleBrowserOverlay.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -71,7 +70,7 @@ private:
     int activeLayer = 0;
 
     std::array<juce::TextButton, 4> layerTab;
-    std::array<juce::TextButton, 9> oscModeBtn;
+    std::array<juce::TextButton, 8> oscModeBtn;
     WaveformPreview wavePreview;
     juce::Label granularHint;
 
@@ -137,9 +136,7 @@ private:
     juce::Slider synthPortamento;
     juce::Label lblPoly, lblGlide;
 
-    // Sample browser (visible only when osc type == 7 "Smp")
-    juce::TextButton loadSampleBtn { "Browse Samples…" };
-    std::unique_ptr<WDSampleBrowserOverlay> sampleBrowser;
+    // Sample is loaded automatically when a preset is selected from the top bar.
 
     /** Layout zones (updated in resized) for section titles in paint — TASK_009 columns + LFO strip. */
     juce::Rectangle<int> zoneOsc, zoneFilt, zoneAmp, zoneLfo;
@@ -160,6 +157,11 @@ private:
     juce::Label lblL2R, lblL2D, lblL2Sh;
 
     int lastOscTypeIndex = 0;
+
+    // Sub-tab navigation: OSC | FILTER | AMP | LFO
+    std::array<juce::TextButton, 4> synthSubTab;
+    int activeSynthTab = 0;
+    void showSynthTab(int tabIndex);
 
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> globalSAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> globalCAtt;

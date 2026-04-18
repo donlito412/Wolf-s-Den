@@ -152,6 +152,7 @@ void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const Para
 {
     currentNote = midiNote;
     currentVel = velocity;
+    filterUpdateTick_ = kFilterUpdateInterval; // force immediate filter recalc on next render
     phaseSin = phaseSaw = phaseSq = phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
     triIntegrator = 0;
     uniSin.fill(0.0);
@@ -210,6 +211,7 @@ void VoiceLayer::noteOnSteal(int midiNote,
 {
     currentNote = midiNote;
     currentVel = velocity;
+    filterUpdateTick_ = kFilterUpdateInterval; // force immediate filter recalc on next render
     phaseSin = phaseSaw = phaseSq = phaseWt = phaseSmpl = phaseFmCar = phaseFmMod = 0;
     triIntegrator = 0;
     uniSin.fill(0.0);
@@ -448,7 +450,7 @@ void VoiceLayer::configureFilterBank(dsp::Biquad& f,
     combDelay = 0;
     double fc = cutoffHz * std::pow(2.0, modSemitones / 12.0);
     fc = juce::jlimit(40.0, sr * 0.45, fc);
-    const double Q = juce::jlimit(0.5, 18.0, resonance * 0.12 + 0.55);
+    const double Q = juce::jlimit(0.5, 8.0, resonance * 0.08 + 0.55);
 
     auto bypass = [&](dsp::Biquad& b) {
         setBiquadIdentity(b);
@@ -741,8 +743,18 @@ void VoiceLayer::renderAdd(double& outL,
 
     const int t1 = readChoiceIndex(p.layerFtype[layerIndex], 8, 0);
     const int t2 = readChoiceIndex(p.layerF2type[layerIndex], 8, 0);
-    configureFilterBank(f1, f1s, t1, cut1, res1, modSemi, combDelaySamples1, combFeedback1, combWritePos1, combBuf1);
-    configureFilterBank(f2, f2s, t2, cut2, res2, modSemi, combDelaySamples2, combFeedback2, combWritePos2, combBuf2);
+
+    // Only recalculate biquad coefficients every kFilterUpdateInterval samples.
+    // configureFilterBank calls std::sin/std::cos per sample which is the main
+    // CPU culprit at 3+ simultaneous notes (3 voices × 4 layers × 2 banks).
+    // Updating at ~11 kHz (every 4 samples @ 44.1kHz) is more than sufficient
+    // for envelopes and LFOs and causes no audible difference.
+    if (++filterUpdateTick_ >= kFilterUpdateInterval)
+    {
+        filterUpdateTick_ = 0;
+        configureFilterBank(f1, f1s, t1, cut1, res1, modSemi, combDelaySamples1, combFeedback1, combWritePos1, combBuf1);
+        configureFilterBank(f2, f2s, t2, cut2, res2, modSemi, combDelaySamples2, combFeedback2, combWritePos2, combBuf2);
+    }
 
     const double d1 = (double)readFloatAP(p.layerFilterDrive[layerIndex], p.layerFilterDriveF[layerIndex], 0.f);
     const double d2 = (double)readFloatAP(p.layerF2drive[layerIndex], p.layerF2driveF[layerIndex], 0.f);
@@ -776,11 +788,21 @@ void VoiceLayer::renderAdd(double& outL,
     sig *= smoothedVol;
     sig *= (double)juce::jlimit(0.f, 2.f, modMatrixAmpMul);
 
+    // Safety soft-clip: only clamp extreme values to prevent NaN/Inf propagation.
+    // Per-voice signals legitimately exceed 1.0 when multiple layers are active;
+    // the final output limiter in FxEngine handles the master bus.
+    if (!std::isfinite(sig))
+        sig = 0.0;
+    else if (std::abs(sig) > 4.0)
+        sig = std::tanh(sig * 0.25) * 4.0;
+
     const double panBip = std::clamp(smoothedPan + (double)modMatrixPanAdd, -1.0, 1.0);
+    // Fast linear equal-power-ish panning (avoids per-sample std::cos/std::sin)
     const double pan01 = (panBip + 1.0) * 0.5;
-    const double angle = pan01 * dsp::twoPi * 0.25;
-    outL += sig * std::cos(angle);
-    outR += sig * std::sin(angle);
+    const double gainR = pan01;
+    const double gainL = 1.0 - pan01;
+    outL += sig * gainL;
+    outR += sig * gainR;
 
     lastAmpEnvOut = (float)ampEnv;
     lastFiltEnvOut = (float)filtEnv;

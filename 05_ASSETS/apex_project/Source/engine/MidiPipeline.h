@@ -34,7 +34,12 @@ public:
                  double sampleRate,
                  juce::AudioPlayHead* playHead,
                  const TheoryEngine& theory,
-                 juce::AudioProcessorValueTreeState& apvts) noexcept;
+                 juce::AudioProcessorValueTreeState& apvts,
+                 juce::MidiKeyboardState* keyboardState = nullptr) noexcept;
+
+    void setChordModeEnabled(bool enabled) noexcept;
+    void setKeysLockMode(int modeIndex) noexcept;
+    void setTheoryVoiceLeadingEnabled(bool enabled) noexcept;
 
 private:
     struct Ptrs
@@ -53,6 +58,7 @@ private:
         std::atomic<float>* arpSwing = nullptr;
         std::atomic<float>* arpOctaves = nullptr;
         std::atomic<float>* arpSyncPpq = nullptr;
+        std::atomic<float>* voiceLeading = nullptr;  // cached to avoid hot-path APVTS string lookup
     };
 
     struct ArpStepPtrs
@@ -122,9 +128,91 @@ private:
     int findChordMapForSource(uint8_t src) const noexcept;
     void freeChordMap(int idx) noexcept;
 
-    void removeNoteFromArpPool(uint8_t note) noexcept;
+    void removeNoteFromArpPool(uint8_t note) noexcept
+    {
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < arpPoolCount; ++i)
+        {
+            if (arpPool[(size_t)i] != note)
+                arpPool[(size_t)n++] = arpPool[(size_t)i];
+        }
+        arpPoolCount = n;
+
+        uint8_t m = 0;
+        for (uint8_t i = 0; i < pressCount; ++i)
+        {
+            if (pressOrder[(size_t)i] != note)
+                pressOrder[(size_t)m++] = pressOrder[(size_t)i];
+        }
+        pressCount = m;
+    }
     void addNoteToArpPool(uint8_t note) noexcept;
     void rebuildArpSortBuffer() noexcept;
+
+    void cleanup() noexcept
+    {
+        // Safety check for Arp pool and maps
+        if (arpPoolCount > kMaxPool) arpPoolCount = kMaxPool;
+
+        const bool latch = readArpLatch();
+        if (!latch)
+        {
+            uint8_t n = 0;
+            for (uint8_t i = 0; i < arpPoolCount; ++i)
+            {
+                const uint8_t note = arpPool[(size_t)i];
+                bool found = physicalHeld[(size_t)(note & 127)];
+
+                if (!found)
+                {
+                    for (int j = 0; j < kMaxMap; ++j)
+                    {
+                        if (chordMaps[(size_t)j].used)
+                        {
+                            for (uint8_t k = 0; k < chordMaps[(size_t)j].nOut; ++k)
+                            {
+                                if (chordMaps[(size_t)j].outs[(size_t)k] == note)
+                                {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if (found) break;
+                    }
+                }
+
+                if (found)
+                {
+                    arpPool[(size_t)n++] = note;
+                }
+                // Else: note is removed by not copying it to the new position
+            }
+            arpPoolCount = n;
+
+            // Also cleanup pressOrder
+            uint8_t m = 0;
+            for (uint8_t i = 0; i < pressCount; ++i)
+            {
+                const uint8_t note = pressOrder[(size_t)i];
+                bool found = physicalHeld[(size_t)(note & 127)];
+                if (!found)
+                {
+                    for (int j = 0; j < kMaxMap; ++j)
+                    {
+                        if (chordMaps[(size_t)j].used)
+                        {
+                            for (uint8_t k = 0; k < chordMaps[(size_t)j].nOut; ++k)
+                                if (chordMaps[(size_t)j].outs[(size_t)k] == note) { found = true; break; }
+                        }
+                        if (found) break;
+                    }
+                }
+                if (found) pressOrder[(size_t)m++] = note;
+            }
+            pressCount = m;
+        }
+    }
 
     void allNotesOffOutput(juce::MidiBuffer& out, int samplePos) noexcept;
     void fireArpStep(juce::MidiBuffer& out,
@@ -134,7 +222,8 @@ private:
                      double stepLenSamples,
                      double gateScaleMul,
                      double sampleRate,
-                     bool advanceSequencer) noexcept;
+                     bool advanceSequencer,
+                     juce::MidiKeyboardState* keyboardState = nullptr) noexcept;
 
     bool readStepOn(int stepIndex) const noexcept;
     int readStepVel(int stepIndex) const noexcept;
@@ -144,7 +233,7 @@ private:
 
     Ptrs ptrs {};
     std::array<ArpStepPtrs, kArpSteps> arpStepPtrs {};
-    juce::AudioParameterFloat* arpRateParam = nullptr;
+    juce::AudioParameterChoice* arpRateParam = nullptr;
     juce::AudioParameterFloat* arpSwingParam = nullptr;
     juce::AudioParameterChoice* arpPatternChoice = nullptr;
     std::array<juce::AudioParameterFloat*, kArpSteps> arpStepDurParams {};
@@ -152,6 +241,7 @@ private:
 
     /** PPQ phase snap only on arp enable — avoids fighting per-sample advance (MIDI zipper/static). */
     bool lastProcessArpOn = false;
+    bool lastChordOn = false;
 
     /** End-of-last-block PPQ (predicted) for transport jump detection when sync is on. */
     double lastArpSyncPpq = 0.0;

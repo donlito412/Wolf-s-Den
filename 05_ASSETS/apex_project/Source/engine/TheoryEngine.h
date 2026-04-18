@@ -55,6 +55,15 @@ struct ChordSetListing
     std::string mood;
     std::string energy;
     int scaleId = 0;
+    int rootNote = 0;   ///< pitch class (0=C … 11=B) from chord_sets.root_note
+};
+
+/** One chord entry inside a chord set (one row from chord_set_entries). */
+struct ChordSetEntry
+{
+    int position  = 0;   ///< 1-based order
+    int rootNote  = 0;   ///< pitch class 0-11
+    int chordId   = 0;   ///< index into getChordDefinitions()
 };
 
 /** One row from `packs` — a factory or expansion content pack. */
@@ -210,13 +219,17 @@ public:
      * Given the current chord voicing and a target chord, return the inversion
      * of the target that minimises total voice-movement (sum of abs differences).
      *
-     * @param currentNotes   Sorted MIDI note numbers of the held chord
+     * DSP SAFE: No allocations, no locks.
+     *
+     * @param currentNotes   MIDI note numbers of the held chord (0-127)
+     * @param numCurrent     Number of valid notes in currentNotes (up to 8)
      * @param nextChordIdx   Index into getChordDefinitions()
      * @param nextRoot       Target root MIDI note (any octave; 60 = middle C)
      */
-    VoicingResult computeVoiceLeading (const std::vector<int>& currentNotes,
+    VoicingResult computeVoiceLeading (const int* currentNotes,
+                                       int numCurrent,
                                        int nextChordIdx,
-                                       int nextRoot) const;
+                                       int nextRoot) const noexcept;
 
     // =========================================================================
     // Scale lookup table  (DSP-safe double-buffer)
@@ -236,6 +249,8 @@ public:
     const std::vector<ChordDefinition>& getChordDefinitions() const noexcept { return chordDefs; }
     const std::vector<ScaleDefinition>& getScaleDefinitions() const noexcept { return scaleDefs; }
     const std::vector<ChordSetListing>& getChordSetListings() const noexcept { return chordSetList; }
+    /** Returns the ordered chord entries for a chord set, queried live from the DB. */
+    std::vector<ChordSetEntry> getChordSetEntries (int setId) const;
     const std::vector<PresetListing>&   getPresetListings()   const noexcept { return presetList; }
     const std::vector<PackListing>&     getPackListings()     const noexcept { return packList; }
     int getChordCount() const noexcept { return static_cast<int> (chordDefs.size()); }
@@ -327,12 +342,14 @@ private:
     // Voice-leading helpers
     // =========================================================================
 
-    std::vector<std::vector<int>> generateInversions (const std::vector<int>& intervals,
-                                                      int root,
-                                                      int referenceOctaveMidi) const;
+    int generateInversions (const std::vector<int>& intervals,
+                            int root,
+                            int referenceOctaveMidi,
+                            int (*outNotes)[VoicingResult::kMaxNotes],
+                            int maxCandidates) const noexcept;
 
-    static int totalVoiceMovement (const std::vector<int>& a,
-                                   const std::vector<int>& b) noexcept;
+    static int totalVoiceMovement (const int* a, int nA,
+                                   const int* b, int nB) noexcept;
 
     // =========================================================================
     // Loaded data — immutable after initialise()

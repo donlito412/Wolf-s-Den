@@ -408,7 +408,7 @@ void TheoryEngine::runFftDetection()
         fftMagnitudes[static_cast<size_t> (i)] = std::sqrt (re * re + im * im);
     }
 
-    // Pick the top 6 magnitude peaks → map to pitch classes
+    // Pick the top 6 magnitude peaks -> map to pitch classes
     PitchClassSet pitchClasses {};
     pitchClasses.fill (false);
 
@@ -430,8 +430,9 @@ void TheoryEngine::runFftDetection()
         }
     }
 
-    for (const auto& [mag, bin] : peaks)
+    for (const auto& p : peaks)
     {
+        const int bin = p.second;
         if (bin < 0) continue;
         const int pc = binToPitchClass (bin, kFftSize, currentSampleRate);
         if (pc >= 0)
@@ -526,9 +527,10 @@ void TheoryEngine::storeMatches (const std::array<ChordMatch, 3>& matches) noexc
 // Voice leading
 // =============================================================================
 
-VoicingResult TheoryEngine::computeVoiceLeading (const std::vector<int>& currentNotes,
+VoicingResult TheoryEngine::computeVoiceLeading (const int* currentNotes,
+                                                  int numCurrent,
                                                   int nextChordIdx,
-                                                  int nextRoot) const
+                                                  int nextRoot) const noexcept
 {
     VoicingResult result;
 
@@ -539,106 +541,121 @@ VoicingResult TheoryEngine::computeVoiceLeading (const std::vector<int>& current
 
     // Reference octave: centre around the median of current notes
     int refOctaveMidi = 60; // middle C fallback
-    if (!currentNotes.empty())
+    if (numCurrent > 0 && currentNotes != nullptr)
     {
         int sum = 0;
-        for (int n : currentNotes) sum += n;
-        refOctaveMidi = sum / static_cast<int> (currentNotes.size());
+        for (int i = 0; i < numCurrent; ++i) sum += currentNotes[i];
+        refOctaveMidi = sum / numCurrent;
     }
 
-    const auto candidates = generateInversions (cd.intervals, nextRoot, refOctaveMidi);
+    constexpr int kMaxCand = 16;
+    int candNotes[kMaxCand][VoicingResult::kMaxNotes];
+    const int numCand = generateInversions (cd.intervals, nextRoot, refOctaveMidi, candNotes, kMaxCand);
 
-    if (candidates.empty()) return result;
+    if (numCand <= 0) return result;
 
     // Find the candidate with the minimum total voice movement
-    const std::vector<int>* best = &candidates.front();
+    int bestIdx = 0;
     int bestCost = std::numeric_limits<int>::max();
 
-    for (const auto& candidate : candidates)
+    const int nTarget = static_cast<int>(cd.intervals.size());
+    const int nB = std::min(nTarget, (int)VoicingResult::kMaxNotes);
+
+    for (int i = 0; i < numCand; ++i)
     {
-        const int cost = totalVoiceMovement (currentNotes, candidate);
+        const int cost = totalVoiceMovement (currentNotes, numCurrent, candNotes[i], nB);
         if (cost < bestCost)
         {
             bestCost = cost;
-            best = &candidate;
+            bestIdx = i;
         }
     }
 
     // Fill VoicingResult
-    result.numNotes = std::min (static_cast<int> (best->size()), VoicingResult::kMaxNotes);
-    for (int i = 0; i < result.numNotes; ++i)
-        result.notes[static_cast<size_t> (i)] = (*best)[static_cast<size_t> (i)];
+    result.numNotes = nB;
+    for (int i = 0; i < nB; ++i)
+        result.notes[static_cast<size_t> (i)] = candNotes[bestIdx][i];
 
     return result;
 }
 
-std::vector<std::vector<int>> TheoryEngine::generateInversions (
-    const std::vector<int>& intervals,
-    int root,
-    int referenceOctaveMidi) const
+int TheoryEngine::generateInversions (const std::vector<int>& intervals,
+                                      int root,
+                                      int referenceOctaveMidi,
+                                      int (*outNotes)[VoicingResult::kMaxNotes],
+                                      int maxCandidates) const noexcept
 {
-    if (intervals.empty()) return {};
+    if (intervals.empty() || maxCandidates <= 0 || outNotes == nullptr) return 0;
 
     const int numNotes = static_cast<int> (intervals.size());
+    const int nToCopy = std::min(numNotes, (int)VoicingResult::kMaxNotes);
 
     // Build root-position notes centred near referenceOctaveMidi
-    // Find the octave of root closest to reference
     int rootBase = (referenceOctaveMidi / 12) * 12 + (root % 12);
     if (rootBase < referenceOctaveMidi - 6) rootBase += 12;
     if (rootBase > referenceOctaveMidi + 6) rootBase -= 12;
 
-    // Root-position voicing
-    std::vector<int> rootPos;
-    rootPos.reserve (static_cast<size_t> (numNotes));
-    for (int iv : intervals)
-        rootPos.push_back (juce::jlimit (0, 127, rootBase + iv));
+    int currentCand = 0;
 
-    // Generate all numNotes inversions by rotating the interval stack
-    std::vector<std::vector<int>> candidates;
-    candidates.reserve (static_cast<size_t> (numNotes * 2 + 1));
+    // Root-position voicing as starting point
+    int working[VoicingResult::kMaxNotes];
+    for (int i = 0; i < nToCopy; ++i)
+        working[i] = juce::jlimit (0, 127, rootBase + intervals[(size_t)i]);
 
-    std::vector<int> rotated = rootPos;
-    for (int inv = 0; inv < numNotes; ++inv)
+    // Generate inversions by rotating
+    for (int inv = 0; inv < numNotes && currentCand < maxCandidates; ++inv)
     {
-        candidates.push_back (rotated);
+        for (int i = 0; i < nToCopy; ++i) outNotes[currentCand][i] = working[i];
+        currentCand++;
 
         // Rotate: lowest note goes up one octave
-        std::sort (rotated.begin(), rotated.end());
-        rotated.front() += 12;
-        std::sort (rotated.begin(), rotated.end());
-
-        // Clamp to valid MIDI range
-        for (auto& n : rotated)
-            n = juce::jlimit (0, 127, n);
+        int lowIdx = 0;
+        for (int i = 1; i < nToCopy; ++i) if (working[i] < working[lowIdx]) lowIdx = i;
+        working[lowIdx] += 12;
+        for (int i = 0; i < nToCopy; ++i) working[i] = juce::jlimit(0, 127, working[i]);
     }
 
-    // Also add octave-shifted versions of root position (up and down)
-    auto upOctave = rootPos;
-    for (auto& n : upOctave) n = juce::jlimit (0, 127, n + 12);
-    candidates.push_back (upOctave);
+    // Octave shifts of root pos
+    if (currentCand < maxCandidates)
+    {
+        for (int i = 0; i < nToCopy; ++i) outNotes[currentCand][i] = juce::jlimit(0, 127, rootBase + intervals[(size_t)i] + 12);
+        currentCand++;
+    }
+    if (currentCand < maxCandidates)
+    {
+        for (int i = 0; i < nToCopy; ++i) outNotes[currentCand][i] = juce::jlimit(0, 127, rootBase + intervals[(size_t)i] - 12);
+        currentCand++;
+    }
 
-    auto downOctave = rootPos;
-    for (auto& n : downOctave) n = juce::jlimit (0, 127, n - 12);
-    candidates.push_back (downOctave);
-
-    return candidates;
+    return currentCand;
 }
 
-// static
-int TheoryEngine::totalVoiceMovement (const std::vector<int>& a,
-                                      const std::vector<int>& b) noexcept
+int TheoryEngine::totalVoiceMovement (const int* a, int nA,
+                                      const int* b, int nB) noexcept
 {
-    if (a.empty() || b.empty()) return std::numeric_limits<int>::max();
+    if (nA <= 0 || nB <= 0 || a == nullptr || b == nullptr) return std::numeric_limits<int>::max();
 
-    std::vector<int> sa = a, sb = b;
-    std::sort (sa.begin(), sa.end());
-    std::sort (sb.begin(), sb.end());
+    int sa[VoicingResult::kMaxNotes];
+    int sb[VoicingResult::kMaxNotes];
+    const int countA = std::min(nA, (int)VoicingResult::kMaxNotes);
+    const int countB = std::min(nB, (int)VoicingResult::kMaxNotes);
 
-    // Pair voices by index (handle size mismatch by using the shorter)
-    const int n = std::min (static_cast<int> (sa.size()), static_cast<int> (sb.size()));
+    for (int i = 0; i < countA; ++i) sa[i] = a[i];
+    for (int i = 0; i < countB; ++i) sb[i] = b[i];
+
+    // Simple bubble sort (DSP safe, tiny N)
+    for (int i = 0; i < countA - 1; ++i)
+        for (int j = 0; j < countA - i - 1; ++j)
+            if (sa[j] > sa[j+1]) { int t = sa[j]; sa[j] = sa[j+1]; sa[j+1] = t; }
+
+    for (int i = 0; i < countB - 1; ++i)
+        for (int j = 0; j < countB - i - 1; ++j)
+            if (sb[j] > sb[j+1]) { int t = sb[j]; sb[j] = sb[j+1]; sb[j+1] = t; }
+
+    const int n = std::min (countA, countB);
     int total = 0;
     for (int i = 0; i < n; ++i)
-        total += std::abs (sa[static_cast<size_t> (i)] - sb[static_cast<size_t> (i)]);
+        total += std::abs (sa[i] - sb[i]);
 
     return total;
 }
@@ -791,7 +808,16 @@ void TheoryEngine::seedDatabase()
             count = sqlite3_column_int (stmt, 0);
         sqlite3_finalize (stmt);
     }
-    if (count > 0) return; // Already seeded
+    // Check if chord_sets table already has data
+    int set_count = 0;
+    if (sqlite3_prepare_v2 (db, "SELECT COUNT(*) FROM chord_sets;", -1, &stmt, nullptr) == SQLITE_OK)
+    {
+        if (sqlite3_step (stmt) == SQLITE_ROW)
+            set_count = sqlite3_column_int (stmt, 0);
+        sqlite3_finalize (stmt);
+    }
+
+    if (count > 0 && set_count > 0) return; // Already seeded
 
     // -------------------------------------------------------------------------
     // BEGIN TRANSACTION for fast bulk insert
@@ -800,7 +826,11 @@ void TheoryEngine::seedDatabase()
 
     // =========================================================================
     // 1. CHORD DEFINITIONS  (42 types)
+    //    Guard: only insert if table is empty to avoid duplicate rows when
+    //    chord_sets is being added to an existing DB.
     // =========================================================================
+    if (count == 0)
+    {
     const char* chordSql = R"SQL(
     INSERT INTO chords (name,symbol,interval_pattern,category,quality) VALUES
       ('Major',              'maj',     '[0,4,7]',              'triad',    'major'),
@@ -919,6 +949,8 @@ void TheoryEngine::seedDatabase()
     sqlite3_exec (db, scaleSql, nullptr, nullptr, &errMsg);
     if (errMsg) sqlite3_free (errMsg);
 
+    } // end if (count == 0) — chords/scales only inserted when tables were empty
+
     // =========================================================================
     // 3. CHORD SETS  (216 sets: 18 progressions × 12 keys)
     //    chord_id references:  1=maj  2=m  3=dim  5=sus2  6=sus4
@@ -945,27 +977,31 @@ void TheoryEngine::seedDatabase()
 
     // 18 progressions (entries use 1-based chord IDs from the chords table insert)
     const std::vector<Progression> progs = {
-        { "Pop",       "Bright",    "Medium", 1,  {{0,11},{7,1},{9,12},{5,1}} },   // I-V-vi-IV (maj7 variant)
-        { "Pop",       "Emotive",   "Medium", 2,  {{0,2},{10,1},{8,1},{10,1}} },   // i-VII-VI-VII
-        { "Rock",      "Energetic", "High",   1,  {{0,1},{5,1},{7,1},{0,1}} },     // I-IV-V-I
-        { "Jazz",      "Sophisticated","Medium",1, {{2,12},{7,10},{0,11},{0,11}} }, // ii7-V7-Imaj7
-        { "Pop",       "Nostalgic", "Low",    1,  {{0,1},{9,2},{5,1},{7,1}} },     // I-vi-IV-V
-        { "Electronic","Dark",      "High",   2,  {{0,2},{8,2},{3,1},{10,1}} },    // i-VI-III-VII
-        { "Cinematic", "Dramatic",  "High",   2,  {{0,2},{10,1},{8,1},{5,1}} },    // i-VII-VI-IV
-        { "Lo-Fi",     "Peaceful",  "Low",    5,  {{0,12},{5,12},{7,12},{2,12}} }, // im7-IVm7-Vm7-IIm7 (Dorian)
-        { "R&B",       "Smooth",    "Medium", 1,  {{0,11},{2,12},{7,10},{0,11}} }, // Imaj7-IIm7-V7-Imaj7
-        { "Blues",     "Soulful",   "Medium", 12, {{0,10},{5,10},{7,10},{5,10}} }, // I7-IV7-V7-IV7
-        { "Cinematic", "Tense",     "High",   2,  {{0,14},{3,1},{8,1},{7,10}} },   // im7b5-III-VI-V7
-        { "Ambient",   "Dreamy",    "Low",    7,  {{0,11},{7,11},{2,12},{9,12}} }, // Imaj7-Vmaj7-IIm7-VIm7 (Lydian)
-        { "Electronic","Euphoric",  "High",   1,  {{0,1},{2,2},{5,1},{7,1}} },     // I-II-IV-V
-        { "Jazz",      "Complex",   "Medium", 1,  {{9,12},{2,12},{7,10},{0,11}} }, // vim7-IIm7-V7-Imaj7
-        { "Pop",       "Dark",      "Medium", 2,  {{0,12},{8,11},{3,11},{7,10}} }, // im7-VImaj7-IIImaj7-V7
-        { "Rock",      "Anthemic",  "High",   8,  {{0,1},{10,1},{5,1},{0,1}} },    // I-bVII-IV-I (Mixolydian)
-        { "Flamenco",  "Passionate","High",   6,  {{0,2},{10,1},{8,1},{7,10}} },   // i-VII-VI-V (Phrygian)
-        { "Trap",      "Hard",      "High",   11, {{0,2},{10,1},{8,1},{10,1}} },   // i-VII-VI-VII minor pent
+        { "Pop",       "Anthemic",  "High",   1,  {{0,1},{5,1},{7,1},{5,1},{9,2},{5,1},{7,1},{0,1}} },       // I-IV-V-IV-vi-IV-V-I
+        { "Pop",       "Emotional", "Medium", 1,  {{0,1},{7,1},{9,2},{5,1},{0,1},{7,1},{9,2},{5,1}} },       // I-V-vi-IV (8 bars)
+        { "Pop",       "Chill",     "Low",    1,  {{0,11},{5,11},{2,12},{7,10},{0,11},{5,11},{2,12},{7,10}} }, // Imaj7-IVmaj7-iim7-V7
+        { "Pop",       "Summer",    "High",   1,  {{5,1},{7,1},{9,2},{0,1},{5,1},{7,1},{9,2},{0,1}} },       // IV-V-vi-I
+        { "Rock",      "Gritty",    "High",   2,  {{0,2},{5,2},{7,1},{0,2},{0,2},{5,2},{7,1},{0,2}} },       // i-iv-V-i
+        { "Rock",      "Classic",   "Medium", 8,  {{0,1},{10,1},{5,1},{0,1},{0,1},{10,1},{5,1},{0,1}} },      // I-bVII-IV-I
+        { "Jazz",      "Smooth",    "Low",    1,  {{2,12},{7,10},{0,11},{9,12},{2,12},{7,10},{0,11},{9,12}} }, // iim7-V7-Imaj7-vim7
+        { "Jazz",      "Bluesy",    "Medium", 12, {{0,10},{5,10},{0,10},{7,10},{0,10},{5,10},{0,10},{7,10}} }, // 12-bar start
+        { "Jazz",      "Soul",      "Medium", 1,  {{0,41},{5,41},{2,41},{7,32},{0,41},{5,41},{2,41},{7,32}} }, // I6/9-IV6/9-II6/9-V7#5
+        { "Lo-Fi",     "Rainy",     "Low",    5,  {{0,12},{5,12},{7,10},{0,12},{0,12},{5,12},{7,10},{0,12}} }, // im7-ivm7-V7-im7
+        { "Lo-Fi",     "Vintage",   "Low",    1,  {{0,21},{5,21},{2,22},{7,29},{0,21},{5,21},{2,22},{7,29}} }, // Imaj9-IVmaj9-iim9-V7b9
+        { "R&B",       "Sexy",      "Low",    1,  {{0,21},{9,22},{2,22},{7,29},{0,21},{9,22},{2,22},{7,29}} }, // Imaj9-vim9-iim9-V7b9
+        { "Electronic","Hard",      "High",   2,  {{0,2},{3,1},{8,1},{10,1},{0,2},{3,1},{8,1},{10,1}} },      // i-III-VI-VII
+        { "Electronic","Deep",      "Medium", 5,  {{0,12},{3,11},{10,10},{5,12},{0,12},{3,11},{10,10},{5,12}} },// im7-IIImaj7-bVII7-ivm7
+        { "Cinematic", "Heroic",    "High",   1,  {{0,1},{8,1},{3,1},{7,1},{0,1},{8,1},{3,1},{7,1}} },       // I-VI-III-V
+        { "Cinematic", "Sad",       "Low",    2,  {{0,2},{5,2},{8,1},{7,2},{0,2},{5,2},{8,1},{7,2}} },       // i-iv-VI-v
+        { "Trap",      "Dark",      "High",   2,  {{0,2},{1,1},{0,2},{1,1},{0,2},{1,1},{3,2},{1,1}} },       // i-bII-i-bII-iv-bII
+        { "Blues",     "Standard",  "Medium", 12, {{0,10},{5,10},{0,10},{0,10},{5,10},{5,10},{0,10},{0,10}} }, // 8-bar blues loop
     };
 
     // Insert chord sets for all 12 keys × 18 progressions
+    // First, clear existing entries if any (though seedDatabase usually exits early if chords exist)
+    sqlite3_exec (db, "DELETE FROM chord_set_entries;", nullptr, nullptr, nullptr);
+    sqlite3_exec (db, "DELETE FROM chord_sets;", nullptr, nullptr, nullptr);
+
     for (int key = 0; key < 12; ++key)
     {
         for (int pi = 0; pi < (int) progs.size(); ++pi)
@@ -1073,7 +1109,7 @@ void TheoryEngine::loadChordSetListings()
 
     sqlite3_stmt* stmt = nullptr;
     const int rc = sqlite3_prepare_v2 (db,
-        "SELECT id, name, IFNULL(author,'Wolf Den Factory'), genre, mood, energy, scale_id "
+        "SELECT id, name, IFNULL(author,'Wolf Den Factory'), genre, mood, energy, scale_id, IFNULL(root_note,0) "
         "FROM chord_sets ORDER BY id;",
         -1, &stmt, nullptr);
 
@@ -1091,10 +1127,40 @@ void TheoryEngine::loadChordSetListings()
             row.mood = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 4));
         if (sqlite3_column_type (stmt, 5) != SQLITE_NULL)
             row.energy = reinterpret_cast<const char*> (sqlite3_column_text (stmt, 5));
-        row.scaleId = sqlite3_column_int (stmt, 6);
+        row.scaleId  = sqlite3_column_int (stmt, 6);
+        row.rootNote = sqlite3_column_int (stmt, 7);
         chordSetList.push_back (std::move (row));
     }
     sqlite3_finalize (stmt);
+}
+
+// =============================================================================
+// Chord set entries
+// =============================================================================
+
+std::vector<ChordSetEntry> TheoryEngine::getChordSetEntries (int setId) const
+{
+    std::vector<ChordSetEntry> out;
+    if (!db || setId <= 0) return out;
+
+    sqlite3_stmt* stmt = nullptr;
+    const char* sql =
+        "SELECT position, root_note, chord_id "
+        "FROM chord_set_entries WHERE chord_set_id = ? ORDER BY position;";
+    if (sqlite3_prepare_v2 (db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return out;
+
+    sqlite3_bind_int (stmt, 1, setId);
+    while (sqlite3_step (stmt) == SQLITE_ROW)
+    {
+        ChordSetEntry e;
+        e.position  = sqlite3_column_int (stmt, 0);
+        e.rootNote  = sqlite3_column_int (stmt, 1);
+        e.chordId   = sqlite3_column_int (stmt, 2);
+        out.push_back (e);
+    }
+    sqlite3_finalize (stmt);
+    return out;
 }
 
 // =============================================================================

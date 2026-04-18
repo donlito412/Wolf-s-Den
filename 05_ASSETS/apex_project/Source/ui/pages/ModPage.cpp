@@ -148,14 +148,41 @@ ModPage::ModPage(WolfsDenAudioProcessor& proc)
     diceBtn.onClick = [this] { diceAssignments(); };
 
     addAndMakeVisible(recordBtn);
-    recordBtn.onClick = [] {
-        juce::AlertWindow::showMessageBoxAsync(juce::AlertWindow::InfoIcon,
-                                                "XY record",
-                                                "DAW automation capture for the XY pad will use host parameter automation in a future pass.",
-                                                "OK");
+    recordBtn.onClick = [this] {
+        if (xyRecording)
+        {
+            const juce::File written = stopXyRecordAndSave();
+            recordBtn.setButtonText("Record");
+            recordBtn.setColour(juce::TextButton::buttonColourId, juce::Colour());
+            if (written.existsAsFile())
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::AlertWindow::InfoIcon,
+                    "XY Record",
+                    "Saved to Desktop:\n" + written.getFileName()
+                    + "\n\nCC 74 = X axis, CC 1 = Y axis.\nDrag into your DAW as MIDI automation.",
+                    "OK");
+            else
+                juce::AlertWindow::showMessageBoxAsync(
+                    juce::AlertWindow::WarningIcon, "XY Record",
+                    "Nothing was recorded.", "OK");
+        }
+        else
+        {
+            startXyRecord();
+            recordBtn.setButtonText(juce::String(juce::CharPointer_UTF8("\xe2\x96\xa0")) + juce::String(" Stop"));
+            recordBtn.setColour(juce::TextButton::buttonColourId, juce::Colour(0xffcc2222));
+        }
     };
 
     xyPad = std::make_unique<wolfsden::PerfXyPad>(processor);
+    xyPad->onPositionChanged = [this](float x, float y) {
+        if (!xyRecording) return;
+        XyRecordEvent ev;
+        ev.timeMs = juce::Time::currentTimeMillis() - xyRecordStartMs;
+        ev.x = x;
+        ev.y = y;
+        xyRecordBuffer.push_back(ev);
+    };
     addAndMakeVisible(*xyPad);
 
     syncPageFromMatrix();
@@ -231,10 +258,20 @@ void ModPage::paint(juce::Graphics& g)
     // Color-coded row backgrounds
     auto r = getLocalBounds().reduced(14, 12);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(480, juce::jmax(340, (int)((float)r.getWidth() * 0.46f)));
+    const int leftW = juce::jmin(560, juce::jmax(420, (int)((float)r.getWidth() * 0.56f)));
     auto left = r.withWidth(leftW);
     left.removeFromTop(28); // match resized title push down
     left.removeFromTop(32); // slot page combo + gap
+
+    // Column widths — purely proportional so they always fit inside leftW
+    const int aw    = leftW;
+    const int invW  = 28;
+    const int mutW  = 24;
+    const int scpW  = 48;
+    const int flexW = aw - invW - mutW - scpW;
+    const int srcW  = flexW * 28 / 100;
+    const int tgtW  = flexW * 38 / 100;
+    const int amtW  = flexW - srcW - tgtW;
 
     const int rowH = 28;
     for (int i = 0; i < 8; ++i)
@@ -263,15 +300,11 @@ void ModPage::paint(juce::Graphics& g)
     g.setColour(Theme::textSecondary());
     g.setFont(Theme::fontPanelHeader());
     g.drawText("XY Performance Pad", titleR.removeFromTop(20), juce::Justification::centred);
-    
+
     r.removeFromTop(28); // push BOTH sides down by title height
-    
+
     // Matrix column headers — positioned after slotPage (26) + gap (6)
     const int hdrY = r.getY() + 26 + 6;
-    const int aw = leftW;
-    const int srcW  = juce::jmax(92, aw * 26 / 100);
-    const int tgtW  = juce::jmax(138, aw * 38 / 100);
-    const int amtW  = juce::jmax(72, aw * 22 / 100);
     auto hdrR = juce::Rectangle<int>(r.getX(), hdrY, aw, 14);
     auto h = hdrR;
     g.setColour(Theme::textSecondary());
@@ -279,8 +312,8 @@ void ModPage::paint(juce::Graphics& g)
     g.drawText("Source", h.removeFromLeft(srcW), juce::Justification::centredLeft);
     g.drawText("Target", h.removeFromLeft(tgtW), juce::Justification::centredLeft);
     g.drawText("Amount", h.removeFromLeft(amtW), juce::Justification::centredLeft);
-    g.drawText("Inv", h.removeFromLeft(32), juce::Justification::centred);
-    g.drawText("M", h.removeFromLeft(26), juce::Justification::centred);
+    g.drawText("Inv", h.removeFromLeft(invW), juce::Justification::centred);
+    g.drawText("M",   h.removeFromLeft(mutW), juce::Justification::centred);
     g.drawText("Scope", h, juce::Justification::centred);
 }
 
@@ -288,26 +321,28 @@ void ModPage::resized()
 {
     auto r = getLocalBounds().reduced(14, 12);
     r.removeFromTop(26);
-    const int leftW = juce::jmin(480, juce::jmax(340, (int)((float)r.getWidth() * 0.46f)));
+    const int leftW = juce::jmin(560, juce::jmax(420, (int)((float)r.getWidth() * 0.56f)));
     r.removeFromTop(28); // match title space
-    
+
     auto left = r.removeFromLeft(leftW);
     r.removeFromLeft(10);
     auto right = r;
 
     slotPage.setBounds(left.removeFromTop(26));
     left.removeFromTop(6);
-    // Column headers rendered here too so they align
     left.removeFromTop(16); // header label space
-    const int rowH = 28;
-    // Scale columns proportionally to available width
-    const int aw = left.getWidth();
-    const int srcW  = juce::jmax(92, aw * 26 / 100);
-    const int tgtW  = juce::jmax(138, aw * 38 / 100);
-    const int amtW  = juce::jmax(72, aw * 22 / 100);
-    const int invW  = 32;
-    const int mutW  = 26;
-    const int scpW  = juce::jmax(46, aw - srcW - tgtW - amtW - invW - mutW);
+
+    const int rowH  = 28;
+    // Purely proportional — never exceed leftW
+    const int aw    = left.getWidth();
+    const int invW  = 28;
+    const int mutW  = 24;
+    const int scpW  = 48;
+    const int flexW = aw - invW - mutW - scpW;
+    const int srcW  = flexW * 28 / 100;
+    const int tgtW  = flexW * 38 / 100;
+    const int amtW  = flexW - srcW - tgtW;
+
     for (int i = 0; i < 8; ++i)
     {
         auto row = left.removeFromTop(rowH);
@@ -335,6 +370,51 @@ void ModPage::resized()
     right.removeFromTop(8);
     const int xy = juce::jmin(400, juce::jmin(right.getWidth(), right.getHeight() - 8));
     xyPad->setBounds(right.withSizeKeepingCentre(xy, xy));
+}
+
+// =============================================================================
+// XY Recording
+// =============================================================================
+
+void ModPage::startXyRecord()
+{
+    xyRecordBuffer.clear();
+    xyRecordBuffer.reserve(8192);
+    xyRecordStartMs = juce::Time::currentTimeMillis();
+    xyRecording = true;
+}
+
+juce::File ModPage::stopXyRecordAndSave()
+{
+    xyRecording = false;
+    if (xyRecordBuffer.empty()) return {};
+
+    juce::MidiFile mf;
+    mf.setTicksPerQuarterNote(960);
+
+    juce::MidiMessageSequence seq;
+    constexpr double kBPM = 120.0;
+    constexpr double kTicksPerSec = (kBPM / 60.0) * 960.0;
+
+    for (const auto& ev : xyRecordBuffer)
+    {
+        const double ticks = (double)ev.timeMs * 0.001 * kTicksPerSec;
+        // X → CC 74 (Filter Cutoff — standard XY X mapping)
+        seq.addEvent(juce::MidiMessage::controllerEvent(1, 74, juce::jlimit(0, 127, (int)(ev.x * 127.f))), ticks);
+        // Y → CC 1 (Mod Wheel — standard XY Y mapping)
+        seq.addEvent(juce::MidiMessage::controllerEvent(1,  1, juce::jlimit(0, 127, (int)(ev.y * 127.f))), ticks);
+    }
+    mf.addTrack(seq);
+
+    const auto desktop = juce::File::getSpecialLocation(juce::File::userDesktopDirectory);
+    const auto file = desktop.getNonexistentChildFile("WolfsDen_XY_Automation", ".mid");
+    if (auto out = file.createOutputStream())
+    {
+        mf.writeTo(*out);
+        out->flush();
+    }
+    file.revealToUser();
+    return file;
 }
 
 } // namespace wolfsden::ui

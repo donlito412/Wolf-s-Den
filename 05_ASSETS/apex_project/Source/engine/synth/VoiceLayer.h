@@ -227,6 +227,12 @@ private:
     float cachedAmpA = -1, cachedAmpD = -1, cachedAmpS = -1, cachedAmpR = -1;
     float cachedFilA = -1, cachedFilD = -1, cachedFilS = -1, cachedFilR = -1;
 
+    // Sub-rate filter coefficient update: recalculate every N samples.
+    // sin/cos in setLowPass/setHighPass are expensive — recalculating
+    // every sample multiplies cost by 3-4 voices × 4 layers = 12-16x.
+    static constexpr int kFilterUpdateInterval = 4;
+    int filterUpdateTick_ = 0;
+
     float lastAmpEnvOut = 0.f;
     float lastFiltEnvOut = 0.f;
 

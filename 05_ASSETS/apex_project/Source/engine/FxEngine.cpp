@@ -374,8 +374,9 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
 
         for (int i = 0; i < numSamples; ++i)
         {
-            const float dryL = Lw[i];
-            const float dryR = Rw[i];
+            // Simple denormal protection
+            const float dryL = std::abs(Lw[i]) < 1e-12f ? 0.f : Lw[i];
+            const float dryR = std::abs(Rw[i]) < 1e-12f ? 0.f : Rw[i];
             float wetL = dryL, wetR = dryR;
 
             switch (t)
@@ -520,12 +521,12 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     const float modScl = 0.001f + p1 * 0.005f;
                     const float mod = (0.5f + 0.5f * std::sin(st.lfo)) * (float)(sr * modScl);
                     const float fb = p2 * 0.85f;
-                    st.dL.pushSample(0, dryL + st.fbL * fb);
-                    st.dR.pushSample(0, dryR + st.fbR * fb);
+                    st.dL.pushSample(0, softClip(dryL + st.fbL * fb));
+                    st.dR.pushSample(0, softClip(dryR + st.fbR * fb));
                     wetL = st.dL.popSample(0, 1.f + mod, true);
                     wetR = st.dR.popSample(0, 1.f + mod, true);
-                    st.fbL = wetL;
-                    st.fbR = wetR;
+                    st.fbL = std::isfinite(wetL) ? wetL : 0.f;
+                    st.fbR = std::isfinite(wetR) ? wetR : 0.f;
                     break;
                 }
                 case FxUnitType::Phaser:
@@ -574,12 +575,12 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     const float ms = 1.f + p0 * 999.f;
                     const int del = juce::jlimit(1, (int)(sr * 1.0), (int)(sr * 0.001 * (double)ms));
                     const float fb = p1 * 0.95f;
-                    st.dL.pushSample(0, dryL + st.fbL * fb);
-                    st.dR.pushSample(0, dryR + st.fbR * fb);
+                    st.dL.pushSample(0, softClip(dryL + st.fbL * fb));
+                    st.dR.pushSample(0, softClip(dryR + st.fbR * fb));
                     wetL = st.dL.popSample(0, (float)del, true);
                     wetR = st.dR.popSample(0, (float)del, true);
-                    st.fbL = wetL;
-                    st.fbR = wetR;
+                    st.fbL = std::isfinite(wetL) ? wetL : 0.f;
+                    st.fbR = std::isfinite(wetR) ? wetR : 0.f;
                     break;
                 }
                 case FxUnitType::DelayPingPong:
@@ -587,12 +588,12 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     const float ms = 1.f + p0 * 999.f;
                     const int del = juce::jlimit(1, (int)(sr * 1.0), (int)(sr * 0.001 * (double)ms));
                     const float fb = p1 * 0.95f;
-                    st.dL.pushSample(0, dryL + st.fbR * fb);
-                    st.dR.pushSample(0, dryR + st.fbL * fb);
+                    st.dL.pushSample(0, softClip(dryL + st.fbR * fb));
+                    st.dR.pushSample(0, softClip(dryR + st.fbL * fb));
                     wetL = st.dL.popSample(0, (float)del, true);
                     wetR = st.dR.popSample(0, (float)del, true);
-                    st.fbL = wetL;
-                    st.fbR = wetR;
+                    st.fbL = std::isfinite(wetL) ? wetL : 0.f;
+                    st.fbR = std::isfinite(wetR) ? wetR : 0.f;
                     break;
                 }
                 case FxUnitType::StereoWidth:
@@ -697,6 +698,19 @@ void FxEngine::processBlock(juce::AudioBuffer<float>& layerBus,
     outStereo.clear(0, 0, n);
     if (outStereo.getNumChannels() > 1)
         outStereo.clear(1, 0, n);
+
+    // Safety limiter: soft-clip final output to prevent speaker damage without harsh distortion
+    for (int ch = 0; ch < scratchMixStereo.getNumChannels(); ++ch)
+    {
+        float* d = scratchMixStereo.getWritePointer(ch);
+        for (int i = 0; i < n; ++i)
+        {
+            if (!std::isfinite(d[i]))
+                d[i] = 0.f;
+            else if (std::abs(d[i]) > 1.0f)
+                d[i] = std::tanh(d[i]);
+        }
+    }
 
     if (outStereo.getNumChannels() > 1)
     {
