@@ -770,6 +770,7 @@ void TheoryEngine::createSchema()
             energy          INTEGER DEFAULT 2,
             root_key        INTEGER DEFAULT 0,
             chord_sequence  TEXT NOT NULL,  -- JSON array of chord_definition_id values
+            root_sequence   TEXT NOT NULL DEFAULT '[0,0,0,0]',  -- JSON array of semitone offsets
             created_at      TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -796,6 +797,10 @@ void TheoryEngine::createSchema()
         "ALTER TABLE presets ADD COLUMN env_decay    REAL DEFAULT 0.3;",
         "ALTER TABLE presets ADD COLUMN env_sustain  REAL DEFAULT 0.8;",
         "ALTER TABLE presets ADD COLUMN env_release  REAL DEFAULT 0.4;",
+        // Progressions migration: add root_sequence column introduced in TASK_020.
+        // SQLite returns an error if the column already exists — that error is intentionally ignored
+        // by the loop below, making this a safe no-op for fresh DBs.
+        "ALTER TABLE progressions ADD COLUMN root_sequence TEXT DEFAULT '[0,0,0,0]';",
         nullptr
     };
     for (int i = 0; migrations[i] != nullptr; ++i)
@@ -1085,128 +1090,145 @@ void TheoryEngine::seedDatabase()
             sqlite3_finalize(pstmt);
         }
 
-        if (prog_count == 0)
+        // Check if existing progressions have root_sequence populated
+        // (handles upgrade from TASK_012 which seeded without root_sequence)
+        int has_roots = 0;
+        sqlite3_stmt* rchk = nullptr;
+        if (sqlite3_prepare_v2(db,
+            "SELECT COUNT(*) FROM progressions WHERE root_sequence IS NOT NULL AND root_sequence != '[0,0,0,0]';",
+            -1, &rchk, nullptr) == SQLITE_OK)
         {
+            if (sqlite3_step(rchk) == SQLITE_ROW)
+                has_roots = sqlite3_column_int(rchk, 0);
+            sqlite3_finalize(rchk);
+        }
+
+        if (prog_count == 0 || has_roots == 0)
+        {
+            // Delete and re-seed with correct root_sequence data
+            sqlite3_exec(db, "DELETE FROM progressions;", nullptr, nullptr, nullptr);
             sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
 
             // Helper lambda: insert one progression row
-            auto ins = [&](const char* name, const char* genre, const char* mood, int energy, const char* seq)
+            auto ins = [&](const char* name, const char* genre, const char* mood, int energy,
+                           const char* seq, const char* roots)
             {
                 std::string sql =
-                    std::string("INSERT OR IGNORE INTO progressions (name,genre,mood,energy,root_key,chord_sequence) VALUES ('")
-                    + name + "','" + genre + "','" + mood + "'," + std::to_string(energy) + ",0,'" + seq + "');";
+                    std::string("INSERT OR IGNORE INTO progressions (name,genre,mood,energy,root_key,chord_sequence,root_sequence) VALUES ('")
+                    + name + "','" + genre + "','" + mood + "',"
+                    + std::to_string(energy) + ",0,'" + seq + "','" + roots + "');";
                 sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
             };
 
             // ---- Hip-Hop ----
-            ins("Trap God",       "Hip-Hop", "Dark",       3, "[2,12,3,2]");          // im7-bII-dim-i
-            ins("Soul Sample",    "Hip-Hop", "Melancholic", 2, "[12,22,14,10]");       // m7-m9-m7b5-dom7
-            ins("Dilla Bounce",   "Hip-Hop", "Warm",       2, "[11,12,10,22]");        // maj7-m7-dom7-m9
-            ins("Night Drive",    "Hip-Hop", "Dark",       2, "[2,2,10,2]");           // i-i-dom7-i
-            ins("Golden Era",     "Hip-Hop", "Nostalgic",  2, "[1,12,10,1]");          // I-m7-dom7-I
-            ins("Melancholy",     "Hip-Hop", "Sad",        1, "[12,14,10,2]");         // m7-m7b5-dom7-m
-            ins("West Coast",     "Hip-Hop", "Smooth",     2, "[2,12,2,12]");          // i-m7-i-m7
-            ins("Brooklyn",       "Hip-Hop", "Tense",      3, "[2,3,12,10]");          // i-dim-m7-dom7
+            ins("Trap God",       "Hip-Hop","Dark",       3,"[2,12,3,2]",    "[0,1,0,0]");   // i-bII-dim-i
+            ins("Soul Sample",    "Hip-Hop","Melancholic", 2,"[12,22,14,10]", "[0,0,5,7]");   // im7-IVm9-iim7b5-V7
+            ins("Dilla Bounce",   "Hip-Hop","Warm",       2,"[11,12,10,22]", "[0,5,7,9]");   // Imaj7-IVm7-V7-VIm9
+            ins("Night Drive",    "Hip-Hop","Dark",       2,"[2,2,10,2]",    "[0,0,7,0]");   // i-i-V7-i
+            ins("Golden Era",     "Hip-Hop","Nostalgic",  2,"[1,12,10,1]",   "[0,9,7,0]");   // I-vim7-V7-I
+            ins("Melancholy",     "Hip-Hop","Sad",        1,"[12,14,10,2]",  "[0,5,7,0]");   // im7-ivm7b5-V7-i
+            ins("West Coast",     "Hip-Hop","Smooth",     2,"[2,12,2,12]",   "[0,5,0,5]");   // i-ivm7-i-ivm7
+            ins("Brooklyn",       "Hip-Hop","Tense",      3,"[2,3,12,10]",   "[0,3,5,7]");   // i-bIIIdim-ivm7-V7
 
             // ---- R&B / Neo-Soul ----
-            ins("Slow Burn",      "R&B", "Sensual",   1, "[21,22,22,29]");             // Imaj9-VIm9-iim9-V7b9
-            ins("Butterfly",      "R&B", "Romantic",  2, "[11,12,10,11]");             // maj7-m7-dom7-maj7
-            ins("Neo Groove",     "R&B", "Uplifting", 2, "[21,20,22,10]");             // maj9-dom9-m9-dom7
-            ins("After Midnight", "R&B", "Dark",      1, "[22,14,10,22]");             // m9-m7b5-dom7-m9
-            ins("Summer Love",    "R&B", "Warm",      2, "[41,22,10,42]");             // 6/9-m9-dom7-m6/9
-            ins("Old School",     "R&B", "Nostalgic", 2, "[8,9,10,11]");               // maj6-m6-dom7-maj7
-            ins("Smooth Groove",  "R&B", "Smooth",    1, "[11,22,10,11]");             // maj7-m9-dom7-maj7
-            ins("Pain",           "R&B", "Sad",       1, "[12,14,10,2]");              // m7-m7b5-dom7-m
+            ins("Slow Burn",      "R&B","Sensual",   1,"[21,22,22,29]", "[0,9,2,7]");  // Imaj9-VIm9-iim9-V7b9
+            ins("Butterfly",      "R&B","Romantic",  2,"[11,12,10,11]", "[0,9,2,7]");  // Imaj7-VIm7-iim7-V7
+            ins("Neo Groove",     "R&B","Uplifting", 2,"[21,20,22,10]", "[0,7,2,7]");  // Imaj9-V9-iim9-V7
+            ins("After Midnight", "R&B","Dark",      1,"[22,14,10,22]", "[0,2,7,0]");  // Im9-iim7b5-V7-Im9
+            ins("Summer Love",    "R&B","Warm",      2,"[41,22,10,42]", "[0,2,7,0]");  // I6/9-iim9-V7-Im6/9
+            ins("Old School",     "R&B","Nostalgic", 2,"[8,9,10,11]",   "[0,9,7,0]");  // Imaj6-VIm6-V7-Imaj7
+            ins("Smooth Groove",  "R&B","Smooth",    1,"[11,22,10,11]", "[0,2,7,0]");  // Imaj7-iim9-V7-Imaj7
+            ins("Pain",           "R&B","Sad",       1,"[12,14,10,2]",  "[0,5,7,0]");  // im7-ivm7b5-V7-i
 
             // ---- Pop ----
-            ins("Radio Hit",      "Pop", "Uplifting", 3, "[1,5,2,1]");                 // I-IV-vi-I
-            ins("Anthem",         "Pop", "Anthemic",  3, "[1,5,1,5]");                 // I-IV-I-IV
-            ins("Dancefloor",     "Pop", "Energetic", 3, "[1,2,5,1]");                 // I-vi-IV-I
-            ins("Comeback",       "Pop", "Emotional", 2, "[1,4,5,2]");                 // I-V-IV-vi (Beatles)
-            ins("Sad Pop",        "Pop", "Sad",       2, "[2,5,1,4]");                 // vi-IV-I-V
-            ins("Dreamy",         "Pop", "Dreamy",    1, "[11,22,10,11]");             // maj7-m9-dom7-maj7
-            ins("Chill Vibes",    "Pop", "Chill",     1, "[1,5,2,5]");                 // I-IV-vi-V
-            ins("Happy Day",      "Pop", "Happy",     3, "[1,4,5,4]");                 // I-V-IV-V
+            ins("Radio Hit",      "Pop","Uplifting", 3,"[1,5,2,1]",     "[0,5,9,0]");  // I-IV-vi-I
+            ins("Anthem",         "Pop","Anthemic",  3,"[1,5,1,5]",     "[0,5,0,5]");  // I-IV-I-IV
+            ins("Dancefloor",     "Pop","Energetic", 3,"[1,2,5,1]",     "[0,9,5,0]");  // I-vi-IV-I
+            ins("Comeback",       "Pop","Emotional", 2,"[1,4,5,2]",     "[0,7,5,9]");  // I-V-IV-vi
+            ins("Sad Pop",        "Pop","Sad",       2,"[2,5,1,4]",     "[9,5,0,7]");  // vi-IV-I-V
+            ins("Dreamy",         "Pop","Dreamy",    1,"[11,22,10,11]", "[0,2,7,0]");  // Imaj7-iim9-V7-Imaj7
+            ins("Chill Vibes",    "Pop","Chill",     1,"[1,5,2,5]",     "[0,5,9,7]");  // I-IV-vi-V
+            ins("Happy Day",      "Pop","Happy",     3,"[1,4,5,4]",     "[0,7,5,7]");  // I-V-IV-V
 
             // ---- Jazz ----
-            ins("ii-V-I",         "Jazz", "Smooth",   2, "[12,10,11,12]");             // iim7-V7-Imaj7-iim7
-            ins("Tritone Sub",    "Jazz", "Tense",    2, "[12,29,11,12]");             // iim7-7b9-Imaj7-iim7
-            ins("Autumn Leaves",  "Jazz", "Melancholic",2,"[12,10,11,22]");            // iim7-V7-Imaj7-VIm9
-            ins("Giant Steps",    "Jazz", "Complex",  3, "[11,10,11,10]");             // Imaj7-V7-IIImaj7-V7
-            ins("Coltrane Turnaround","Jazz","Tense", 3, "[11,10,11,10]");
-            ins("Blue Bossa",     "Jazz", "Latin",    2, "[12,10,11,22]");
-            ins("So What",        "Jazz", "Cool",     1, "[12,12,12,12]");             // Dm7 modal
-            ins("Rhythm Changes", "Jazz", "Bebop",    3, "[1,2,10,1]");                // I-vi-V7-I
+            ins("ii-V-I",         "Jazz","Smooth",     2,"[12,10,11,12]", "[2,7,0,2]"); // Dm7-G7-Cmaj7-Dm7
+            ins("Tritone Sub",    "Jazz","Tense",      2,"[12,29,11,12]", "[2,6,0,2]"); // Dm7-Db7b9-Cmaj7-Dm7
+            ins("Autumn Leaves",  "Jazz","Melancholic",2,"[12,10,11,22]", "[2,7,0,9]"); // Dm7-G7-Cmaj7-Am9
+            ins("Giant Steps",    "Jazz","Complex",    3,"[11,10,11,10]", "[0,7,4,11]");// Cmaj7-G7-Emaj7-B7
+            ins("Coltrane Turnaround","Jazz","Tense",  3,"[11,10,11,10]", "[0,4,8,11]");// Cmaj7-E7-Abmaj7-B7
+            ins("Blue Bossa",     "Jazz","Latin",      2,"[12,10,11,22]", "[2,7,0,9]"); // Dm7-G7-Cmaj7-Am9
+            ins("So What",        "Jazz","Cool",       1,"[12,12,12,12]", "[2,2,2,2]"); // Dm7 modal vamp
+            ins("Rhythm Changes", "Jazz","Bebop",      3,"[1,2,10,1]",    "[0,9,7,0]"); // I-vi-V7-I
 
             // ---- Lo-Fi ----
-            ins("Rainy Day",      "Lo-Fi", "Melancholic",1,"[12,22,29,12]");           // m7-m9-V7b9-m7
-            ins("Bedroom Tape",   "Lo-Fi", "Nostalgic",  1,"[11,22,10,11]");
-            ins("Sunday Morning", "Lo-Fi", "Calm",       1,"[21,22,11,10]");
-            ins("Dusty Crate",    "Lo-Fi", "Warm",       1,"[11,9,10,12]");            // maj7-m6-dom7-m7
-            ins("Late Night",     "Lo-Fi", "Dark",       1,"[12,14,10,2]");
-            ins("Coffee Shop",    "Lo-Fi", "Calm",       1,"[21,11,10,22]");
-            ins("Vintage Loop",   "Lo-Fi", "Nostalgic",  1,"[41,22,10,42]");
-            ins("Crinkle",        "Lo-Fi", "Dreamy",     1,"[11,12,12,10]");
+            ins("Rainy Day",      "Lo-Fi","Melancholic",1,"[12,22,29,12]", "[0,2,7,0]");
+            ins("Bedroom Tape",   "Lo-Fi","Nostalgic",  1,"[11,22,10,11]", "[0,2,7,0]");
+            ins("Sunday Morning", "Lo-Fi","Calm",       1,"[21,22,11,10]", "[0,2,5,7]");
+            ins("Dusty Crate",    "Lo-Fi","Warm",       1,"[11,9,10,12]",  "[0,9,7,2]");
+            ins("Late Night",     "Lo-Fi","Dark",       1,"[12,14,10,2]",  "[0,5,7,0]");
+            ins("Coffee Shop",    "Lo-Fi","Calm",       1,"[21,11,10,22]", "[0,5,7,2]");
+            ins("Vintage Loop",   "Lo-Fi","Nostalgic",  1,"[41,22,10,42]", "[0,2,7,0]");
+            ins("Crinkle",        "Lo-Fi","Dreamy",     1,"[11,12,12,10]", "[0,5,2,7]");
 
             // ---- Afrobeats ----
-            ins("Afro High Life", "Afrobeats", "Uplifting",3,"[1,4,5,1]");             // I-IV-V-I
-            ins("Lagos Nights",   "Afrobeats", "Energetic",3,"[1,2,5,4]");
-            ins("Makossa",        "Afrobeats", "Happy",    3,"[1,5,4,1]");
-            ins("Afropop",        "Afrobeats", "Euphoric", 3,"[1,1,4,5]");
-            ins("Highlife Gold",  "Afrobeats", "Warm",     2,"[1,4,1,5]");
-            ins("Juju",           "Afrobeats", "Spiritual",2,"[1,2,4,1]");
-            ins("Fuji Funk",      "Afrobeats", "Energetic",3,"[4,1,5,4]");
-            ins("Naija",          "Afrobeats", "Uplifting",3,"[1,5,4,2]");
+            ins("Afro High Life", "Afrobeats","Uplifting", 3,"[1,4,5,1]", "[0,5,7,0]");
+            ins("Lagos Nights",   "Afrobeats","Energetic", 3,"[1,2,5,4]", "[0,9,7,5]");
+            ins("Makossa",        "Afrobeats","Happy",     3,"[1,5,4,1]", "[0,7,5,0]");
+            ins("Afropop",        "Afrobeats","Euphoric",  3,"[1,1,4,5]", "[0,0,5,7]");
+            ins("Highlife Gold",  "Afrobeats","Warm",      2,"[1,4,1,5]", "[0,5,0,7]");
+            ins("Juju",           "Afrobeats","Spiritual", 2,"[1,2,4,1]", "[0,9,5,0]");
+            ins("Fuji Funk",      "Afrobeats","Energetic", 3,"[4,1,5,4]", "[5,0,7,5]");
+            ins("Naija",          "Afrobeats","Uplifting", 3,"[1,5,4,2]", "[0,7,5,9]");
 
             // ---- Trap ----
-            ins("Dark Flex",      "Trap", "Dark",       3,"[2,1,2,3]");               // i-bII-i-dim
-            ins("Ominous",        "Trap", "Tense",      3,"[2,3,2,10]");              // i-dim-i-dom7
-            ins("Paranoid",       "Trap", "Aggressive", 3,"[2,14,3,2]");
-            ins("808 Roll",       "Trap", "Dark",       3,"[2,12,14,2]");
-            ins("Minor Threat",   "Trap", "Tense",      3,"[2,2,3,10]");
-            ins("Street Hymn",    "Trap", "Melancholic",2,"[12,14,10,2]");
-            ins("Icey",           "Trap", "Cold",       2,"[2,12,3,12]");
-            ins("South Side",     "Trap", "Dark",       3,"[2,10,3,2]");
+            ins("Dark Flex",      "Trap","Dark",       3,"[2,1,2,3]",    "[0,1,0,3]");
+            ins("Ominous",        "Trap","Tense",      3,"[2,3,2,10]",   "[0,3,0,7]");
+            ins("Paranoid",       "Trap","Aggressive", 3,"[2,14,3,2]",   "[0,2,5,0]");
+            ins("808 Roll",       "Trap","Dark",       3,"[2,12,14,2]",  "[0,5,2,0]");
+            ins("Minor Threat",   "Trap","Tense",      3,"[2,2,3,10]",   "[0,0,3,7]");
+            ins("Street Hymn",    "Trap","Melancholic",2,"[12,14,10,2]", "[0,5,7,0]");
+            ins("Icey",           "Trap","Cold",       2,"[2,12,3,12]",  "[0,5,3,2]");
+            ins("South Side",     "Trap","Dark",       3,"[2,10,3,2]",   "[0,7,3,0]");
 
             // ---- EDM / Dance ----
-            ins("Euphoria",       "EDM", "Euphoric",  3,"[1,2,4,5]");
-            ins("Festival",       "EDM", "Energetic", 3,"[1,5,4,5]");
-            ins("Drop",           "EDM", "Aggressive",3,"[1,2,5,1]");
-            ins("Build Up",       "EDM", "Tense",     3,"[2,4,5,1]");
-            ins("Sunrise",        "EDM", "Uplifting", 3,"[1,4,5,2]");
-            ins("Trance Gate",    "EDM", "Euphoric",  3,"[2,4,5,2]");
-            ins("Deep House",     "EDM", "Smooth",    2,"[12,11,22,10]");
-            ins("Progressive",    "EDM", "Energetic", 3,"[2,5,4,1]");
+            ins("Euphoria",       "EDM","Euphoric",  3,"[1,2,4,5]", "[0,9,5,7]");
+            ins("Festival",       "EDM","Energetic", 3,"[1,5,4,5]", "[0,7,5,7]");
+            ins("Drop",           "EDM","Aggressive",3,"[1,2,5,1]", "[0,9,5,0]");
+            ins("Build Up",       "EDM","Tense",     3,"[2,4,5,1]", "[9,5,7,0]");
+            ins("Sunrise",        "EDM","Uplifting", 3,"[1,4,5,2]", "[0,7,5,9]");
+            ins("Trance Gate",    "EDM","Euphoric",  3,"[2,4,5,2]", "[9,5,7,9]");
+            ins("Deep House",     "EDM","Smooth",    2,"[12,11,22,10]","[0,7,2,7]");
+            ins("Progressive",    "EDM","Energetic", 3,"[2,5,4,1]", "[9,7,5,0]");
 
             // ---- Gospel ----
-            ins("Church Stomp",   "Gospel", "Spiritual",  3,"[1,4,1,5]");
-            ins("Hallelujah",     "Gospel", "Uplifting",  3,"[1,4,5,1]");
-            ins("Holy Ghost",     "Gospel", "Euphoric",   3,"[1,2,5,4]");
-            ins("Testimony",      "Gospel", "Emotional",  2,"[11,10,12,11]");
-            ins("Sunday Service", "Gospel", "Warm",       2,"[1,5,4,1]");
-            ins("Revival",        "Gospel", "Energetic",  3,"[1,4,5,2]");
-            ins("Amen Break",     "Gospel", "Spiritual",  3,"[4,2,5,1]");
-            ins("Walk By Faith",  "Gospel", "Uplifting",  2,"[1,2,4,5]");
+            ins("Church Stomp",   "Gospel","Spiritual",  3,"[1,4,1,5]",    "[0,5,0,7]");
+            ins("Hallelujah",     "Gospel","Uplifting",  3,"[1,4,5,1]",    "[0,5,7,0]");
+            ins("Holy Ghost",     "Gospel","Euphoric",   3,"[1,2,5,4]",    "[0,9,7,5]");
+            ins("Testimony",      "Gospel","Emotional",  2,"[11,10,12,11]","[0,7,2,0]");
+            ins("Sunday Service", "Gospel","Warm",       2,"[1,5,4,1]",    "[0,7,5,0]");
+            ins("Revival",        "Gospel","Energetic",  3,"[1,4,5,2]",    "[0,5,7,9]");
+            ins("Amen Break",     "Gospel","Spiritual",  3,"[4,2,5,1]",    "[5,9,7,0]");
+            ins("Walk By Faith",  "Gospel","Uplifting",  2,"[1,2,4,5]",    "[0,9,5,7]");
 
             // ---- Cinematic / Orchestral ----
-            ins("Heroic Theme",   "Cinematic", "Epic",       3,"[1,6,4,5]");
-            ins("Sad Reprise",    "Cinematic", "Sad",        1,"[2,5,1,4]");
-            ins("Tension Build",  "Cinematic", "Tense",      3,"[2,3,14,10]");
-            ins("Resolution",     "Cinematic", "Uplifting",  2,"[2,4,5,1]");
-            ins("Flashback",      "Cinematic", "Nostalgic",  1,"[11,12,10,11]");
-            ins("Dark Matter",    "Cinematic", "Dark",       2,"[2,3,12,14]");
-            ins("Victory",        "Cinematic", "Epic",       3,"[1,4,5,4]");
-            ins("Elegy",          "Cinematic", "Melancholic",1,"[12,14,10,2]");
+            ins("Heroic Theme",   "Cinematic","Epic",        3,"[1,6,4,5]",    "[0,5,5,7]");
+            ins("Sad Reprise",    "Cinematic","Sad",          1,"[2,5,1,4]",    "[9,5,0,7]");
+            ins("Tension Build",  "Cinematic","Tense",        3,"[2,3,14,10]",  "[0,3,2,7]");
+            ins("Resolution",     "Cinematic","Uplifting",    2,"[2,4,5,1]",    "[9,5,7,0]");
+            ins("Flashback",      "Cinematic","Nostalgic",    1,"[11,12,10,11]","[0,2,7,0]");
+            ins("Dark Matter",    "Cinematic","Dark",         2,"[2,3,12,14]",  "[0,3,5,2]");
+            ins("Victory",        "Cinematic","Epic",         3,"[1,4,5,4]",    "[0,7,5,7]");
+            ins("Elegy",          "Cinematic","Melancholic",  1,"[12,14,10,2]", "[0,5,7,0]");
 
             // ---- Blues ----
-            ins("12-Bar Shuffle", "Blues", "Gritty",  2,"[10,10,10,10]");             // I7-I7-IV7-V7
-            ins("Texas Stomp",    "Blues", "Energetic",3,"[10,5,10,10]");
-            ins("Delta Blues",    "Blues", "Melancholic",2,"[10,10,13,10]");           // with dim
-            ins("Slow Blues",     "Blues", "Sad",      1,"[10,10,10,14]");
-            ins("Jump Blues",     "Blues", "Happy",    3,"[10,5,10,5]");
-            ins("Boogie Woogie",  "Blues", "Energetic",3,"[10,10,5,10]");
-            ins("Minor Blues",    "Blues", "Dark",     2,"[12,12,14,10]");
-            ins("Chicago",        "Blues", "Smooth",   2,"[10,12,10,5]");
+            ins("12-Bar Shuffle", "Blues","Gritty",     2,"[10,10,10,10]","[0,5,0,7]"); // I7-IV7-I7-V7
+            ins("Texas Stomp",    "Blues","Energetic",  3,"[10,5,10,10]", "[0,5,0,7]");
+            ins("Delta Blues",    "Blues","Melancholic",2,"[10,10,13,10]","[0,5,3,7]");
+            ins("Slow Blues",     "Blues","Sad",        1,"[10,10,10,14]","[0,5,0,7]");
+            ins("Jump Blues",     "Blues","Happy",      3,"[10,5,10,5]",  "[0,5,0,7]");
+            ins("Boogie Woogie",  "Blues","Energetic",  3,"[10,10,5,10]", "[0,5,5,7]");
+            ins("Minor Blues",    "Blues","Dark",       2,"[12,12,14,10]","[0,5,2,7]");
+            ins("Chicago",        "Blues","Smooth",     2,"[10,12,10,5]", "[0,9,7,5]");
 
             sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
         }
@@ -1336,8 +1358,9 @@ std::vector<ProgressionListing> TheoryEngine::getProgressionListings(const std::
     std::vector<ProgressionListing> out;
     if (!db) return out;
 
-    std::string sql = "SELECT id, name, genre, IFNULL(mood,''), energy, root_key, chord_sequence "
-                      "FROM progressions";
+    std::string sql = "SELECT id, name, genre, IFNULL(mood,''), energy, root_key, "
+                  "chord_sequence, IFNULL(root_sequence,'[0,0,0,0]') "
+                  "FROM progressions";
     if (!genre.empty() && genre != "All")
         sql += " WHERE genre = ?";
     sql += " ORDER BY genre ASC, name ASC;";
@@ -1359,6 +1382,10 @@ std::vector<ProgressionListing> TheoryEngine::getProgressionListings(const std::
         p.energy        = sqlite3_column_int(stmt, 4);
         p.rootKey       = sqlite3_column_int(stmt, 5);
         p.chordSequence = parseIntervalJson(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6)));
+        p.rootSequence  = parseIntervalJson(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7)));
+        // Ensure rootSequence has same length as chordSequence (pad with zeros if old data)
+        while ((int)p.rootSequence.size() < (int)p.chordSequence.size())
+            p.rootSequence.push_back(0);
         out.push_back(std::move(p));
     }
     sqlite3_finalize(stmt);

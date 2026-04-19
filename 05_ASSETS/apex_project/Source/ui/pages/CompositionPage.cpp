@@ -317,9 +317,9 @@ void CompositionPage::buildFilterPills()
     }
 
     pillsBuilt = true;
+    resized();             // lay out viewport bounds FIRST
     rebuildFilteredIndices();
-    rebuildBrowseGrid();
-    resized(); // re-layout now that pills exist
+    rebuildBrowseGrid();   // NOW viewport.getViewWidth() is valid
 }
 
 void CompositionPage::applyGenreFilter(const juce::String& genre)
@@ -332,7 +332,7 @@ void CompositionPage::applyGenreFilter(const juce::String& genre)
     auto& th = processor.getTheoryEngine();
     if (th.isDatabaseReady()) {
         cachedProgressions = th.getProgressionListings(activeGenre.toStdString());
-    }
+            }
 
     rebuildFilteredIndices();
     rebuildBrowseGrid();
@@ -387,6 +387,7 @@ void CompositionPage::rebuildBrowseGrid()
     auto& th = processor.getTheoryEngine();
     if (!th.isDatabaseReady()) return;
 
+    
     const int vw   = juce::jmax(1, gridViewport.getViewWidth());
     const int cols = juce::jmax(1, vw / 200);
     const int cw   = (vw - 8 * (cols + 1)) / cols;
@@ -416,10 +417,12 @@ void CompositionPage::selectProgression(int id)
 
     // Find the sequence in cache
     currentChordSequence.clear();
+    currentRootSequence.clear();
     for (const auto& p : cachedProgressions) {
         if (p.id == id) {
             currentChordSequence = p.chordSequence;
-            currentRootKey = p.rootKey;
+            currentRootSequence  = p.rootSequence;
+            currentRootKey       = p.rootKey;
             break;
         }
     }
@@ -461,8 +464,9 @@ void CompositionPage::refreshAuditionPads()
             // We will just use the rootKey for now to get it displaying something, but ideally
             // the progression should store the roots.
 
-            // For now, let's just use the rootKey.
-            int rootPc = currentRootKey;
+            // Use per-chord root offset from rootSequence, fall back to progression root if missing
+            int chordRootOffset = (i < (int)currentRootSequence.size()) ? currentRootSequence[(size_t)i] : 0;
+            int rootPc = (currentRootKey + chordRootOffset) % 12;
 
             p.setButtonText(chordName(rootPc, chordId));
             p.setColour(juce::TextButton::textColourOffId, Theme::textPrimary());
@@ -487,7 +491,9 @@ void CompositionPage::playAuditionPad(int idx)
     for (auto& d : defs)
         if (d.id == chordId) { iv = d.intervals; break; }
 
-    startPreview(48 + currentRootKey, iv);
+    int chordRootOffset = (idx < (int)currentRootSequence.size()) ? currentRootSequence[(size_t)idx] : 0;
+    int midiRoot = juce::jlimit(24, 96, 48 + currentRootKey + chordRootOffset);
+    startPreview(midiRoot, iv);
 }
 
 void CompositionPage::addAuditionPadToSlot(int entryIndex)
@@ -498,7 +504,8 @@ void CompositionPage::addAuditionPadToSlot(int entryIndex)
     {
         if (!slotData[(size_t)i].has_value())
         {
-            slotData[(size_t)i] = { chordId, currentRootKey };
+            int chordRootOffset = (entryIndex < (int)currentRootSequence.size()) ? currentRootSequence[(size_t)entryIndex] : 0;
+            slotData[(size_t)i] = { chordId, (currentRootKey + chordRootOffset) % 12 };
             refreshSlotLabels();
             return;
         }
@@ -886,7 +893,6 @@ void CompositionPage::resized()
 
     // ---- BROWSE GRID ----
     gridViewport.setBounds(area.removeFromTop(gridH));
-    rebuildBrowseGrid();
     area.removeFromTop(kGap);
 
     // ---- AUDITION ROW ----

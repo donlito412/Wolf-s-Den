@@ -742,6 +742,17 @@ void WolfsDenAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
         custom.setProperty("browseChordSetId",browseChordSetId,   nullptr);
         custom.setProperty("chordData",       chordProgressionBlob, nullptr);
         custom.setProperty("currentPresetId", currentPresetId,    nullptr);
+        
+        // Save keymaps for all 4 layers
+        juce::ValueTree keymaps("SampleKeymaps");
+        for (int layerIdx = 0; layerIdx < 4; ++layerIdx)
+        {
+            auto& keymap = synthEngine.getLayerKeymap(layerIdx);
+            juce::ValueTree layerKeymap = keymap.toValueTree();
+            layerKeymap.setProperty("layerIndex", layerIdx, nullptr);
+            keymaps.appendChild(layerKeymap, nullptr);
+        }
+        custom.appendChild(keymaps, nullptr);
     }
     custom.setProperty("editorWidth", editorWidth.load(std::memory_order_relaxed), nullptr);
     custom.setProperty("editorHeight", editorHeight.load(std::memory_order_relaxed), nullptr);
@@ -778,6 +789,21 @@ void WolfsDenAudioProcessor::setStateInformation(const void* data, int sizeInByt
                 currentPresetId      = (int)custom.getProperty("currentPresetId", -1);
                 editorWidth.store((int)custom.getProperty("editorWidth", 480), std::memory_order_relaxed);
                 editorHeight.store((int)custom.getProperty("editorHeight", 320), std::memory_order_relaxed);
+                
+                // Load keymaps for all 4 layers
+                if (auto keymaps = custom.getChildWithName("SampleKeymaps"); keymaps.isValid())
+                {
+                    for (int i = 0; i < keymaps.getNumChildren(); ++i)
+                    {
+                        auto layerKeymap = keymaps.getChild(i);
+                        const int layerIdx = layerKeymap.getProperty("layerIndex", 0);
+                        if (layerIdx >= 0 && layerIdx < 4)
+                        {
+                            synthEngine.clearSampleKeymap(layerIdx);
+                            synthEngine.getLayerKeymap(layerIdx).fromValueTree(layerKeymap);
+                        }
+                    }
+                }
             }
 
             if (auto mm = root.getChildWithName("ModMatrix"); mm.isValid())

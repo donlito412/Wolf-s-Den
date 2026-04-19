@@ -220,6 +220,33 @@ void addLayerParams(int layerIndex,
         juce::NormalisableRange<float>(0.f, 1.f, 0.f, 1.f),
         0.f));
 
+    out.push_back(std::make_unique<juce::AudioParameterInt>(
+        pid(pfx + "wt_index_a"),
+        "Layer " + juce::String(layerIndex + 1) + " Wavetable A",
+        0, 100, 0));
+
+    out.push_back(std::make_unique<juce::AudioParameterInt>(
+        pid(pfx + "wt_index_b"),
+        "Layer " + juce::String(layerIndex + 1) + " Wavetable B",
+        0, 100, 0));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "sample_start"),
+        "Layer " + juce::String(layerIndex + 1) + " Sample Loop Start",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.001f),
+        0.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterFloat>(
+        pid(pfx + "sample_end"),
+        "Layer " + juce::String(layerIndex + 1) + " Sample Loop End",
+        juce::NormalisableRange<float>(0.f, 1.f, 0.f, 0.001f),
+        1.f));
+
+    out.push_back(std::make_unique<juce::AudioParameterBool>(
+        pid(pfx + "sample_loop"),
+        "Layer " + juce::String(layerIndex + 1) + " Sample Loop",
+        true));
+
     out.push_back(std::make_unique<juce::AudioParameterFloat>(
         pid(pfx + "filter_keytrack"),
         "Layer " + juce::String(layerIndex + 1) + " Filter Key Track",

@@ -132,7 +132,7 @@ void VoiceLayer::reset() noexcept
 static double computeTargetHz(int midiNote,
                               int layerIndex,
                               const ParamPointers& p,
-                              float modMatrixPitchSemi,
+                              double modMatrixPitchFactor,   // pre-baked, default 1.0
                               double fineTuneFactor) noexcept
 {
     const double masterPitchSemi = (double)readFloatAP(p.masterPitch, 0.f);
@@ -140,8 +140,7 @@ static double computeTargetHz(int midiNote,
     const int octave = readIntFromNorm(p.layerOctave[layerIndex], -3, 3, 0);
     double hz = dsp::midiNoteToHz(midiNote + coarse + octave * 12 + (int)std::lround(masterPitchSemi));
     hz *= fineTuneFactor;  // RC1: pre-baked, no std::pow per sample
-    if (modMatrixPitchSemi != 0.f)
-        hz *= std::pow(2.0, (double)modMatrixPitchSemi / 12.0);  // mod matrix changes per block
+    hz *= modMatrixPitchFactor;   // 1.0 when no mod = no cost; non-1.0 = single multiply
     return hz;
 }
 
@@ -164,7 +163,7 @@ void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const Para
 
     ampAdsr.noteOn();
     filtAdsr.noteOn();
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f, cachedFineTuneFactor);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 1.0, cachedFineTuneFactor);
     glideHz = glideTargetHz;
 
     samplePlayer.syncPendingToCache();
@@ -173,21 +172,23 @@ void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const Para
         const float pitchRatio = std::pow(2.f, (float)(midiNote - samplePlayer.rootNote()) / 12.f);
         samplePlayer.startNote(pitchRatio, velocity);
     }
+}
 
-    const float l2d = readFloatAP(p.layerLfo2Delay[layerIndex], 0.f);
-    const float l2f = readFloatAP(p.layerLfo2Fade[layerIndex], 0.f);
-    lfo2DelayRem = (double)l2d * sr;
-    lfo2FadeTotal = (double)l2f * sr;
-    lfo2FadeProg = 0;
-    if (readBoolNorm(p.layerLfo2Retrigger[layerIndex], false))
-        lfoLayer2.phase = 0;
+// Task 017: Multi-sample mapping noteOn implementation
+void VoiceLayer::noteOn(int midiNote, float velocity, int layerIndex, const ParamPointers& p, const SampleKeymap& keymap) noexcept
+{
+    // First select the appropriate sample from the keymap
+    selectSampleFromKeymap(midiNote, velocity, keymap);
+    
+    // Then proceed with normal noteOn using the selected sample
+    noteOn(midiNote, velocity, layerIndex, p);
 }
 
 void VoiceLayer::noteOnLegato(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept
 {
     currentNote = midiNote;
     currentVel = velocity;
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f, cachedFineTuneFactor);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 1.0, cachedFineTuneFactor);
     samplePlayer.syncPendingToCache();
     if (samplePlayer.hasReadableSource())
     {
@@ -203,6 +204,16 @@ void VoiceLayer::noteOnLegato(int midiNote, float velocity, int layerIndex, cons
         lfo2FadeTotal = (double)l2f * sr;
         lfo2FadeProg = 0;
     }
+}
+
+// Task 017: Multi-sample mapping noteOnLegato implementation
+void VoiceLayer::noteOnLegato(int midiNote, float velocity, int layerIndex, const ParamPointers& p, const SampleKeymap& keymap) noexcept
+{
+    // First select the appropriate sample from the keymap
+    selectSampleFromKeymap(midiNote, velocity, keymap);
+    
+    // Then proceed with normal noteOnLegato using the selected sample
+    noteOnLegato(midiNote, velocity, layerIndex, p);
 }
 
 void VoiceLayer::noteOnSteal(int midiNote,
@@ -226,7 +237,7 @@ void VoiceLayer::noteOnSteal(int midiNote,
     ampAdsr.noteOnFromLevel(ampEnvLevel * 0.92);
     filtAdsr.noteOnFromLevel(filtEnvLevel * 0.92);
 
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 0.f, cachedFineTuneFactor);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, 1.0, cachedFineTuneFactor);
     glideHz = glideTargetHz;
     samplePlayer.syncPendingToCache();
     if (samplePlayer.hasReadableSource())
@@ -518,7 +529,7 @@ void VoiceLayer::configureFilterBank(dsp::Biquad& f,
     }
 }
 
-void VoiceLayer::spawnGrain(int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept
+void VoiceLayer::spawnGrain(double hz, int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept
 {
     const float posN = readFloatAP(p.layerGranPos[layerIdx], 0.5f);
     const float sizeN = readFloatAP(p.layerGranSize[layerIdx], 0.1f);
@@ -529,7 +540,9 @@ void VoiceLayer::spawnGrain(int layerIdx, const ParamPointers& p, bool useSample
     const double basePos = freeze ? frozenPlayhead
                                    : (double)posN * (double)juce::jmax(1, span - 1);
     const uint32_t r = rngU32(grainSpawnCounter + layerIdx * 7919);
-    const double jit = ((double)(r & 0xffff) / 32768.0 - 1.0) * scatN * 0.08 * (double)span;
+
+    // FIX 3: Increase scatter position jitter range
+    const double jit = ((double)(r & 0xffff) / 32768.0 - 1.0) * scatN * 0.35 * (double)span;
     double gpos = basePos + jit;
     while (gpos < 0)
         gpos += span;
@@ -539,6 +552,21 @@ void VoiceLayer::spawnGrain(int layerIdx, const ParamPointers& p, bool useSample
     const double lenMs = 1.0 + (double)sizeN * (double)sizeN * 499.0;
     const double lenSamp = juce::jlimit(sr * 0.001, sr * 0.5, lenMs * 0.001 * sr);
 
+    // FIX 1: Grain Pitch Tracking
+    double baseSpeed = 1.0;
+    if (useSampleSource)
+    {
+        const double rootHz = dsp::midiNoteToHz(samplePlayer.rootNote());
+        baseSpeed = hz / rootHz;
+    }
+    else
+    {
+        baseSpeed = hz * (double)granLen / sr;
+    }
+
+    const double scatterRange = (double)scatN * 0.5;
+    const double rndFactor = ((int)(r >> 8) % 1024) / 512.0 - 1.0;
+
     for (auto& g : grains)
     {
         if (!g.active)
@@ -547,7 +575,7 @@ void VoiceLayer::spawnGrain(int layerIdx, const ParamPointers& p, bool useSample
             g.pos = gpos;
             g.winInc = 1.0 / lenSamp;
             g.winPos = 0;
-            g.speed = std::pow(2.0, (((int)(r >> 8) % 513) / 512.0 - 0.5) * scatN * 0.04);
+            g.speed = baseSpeed * std::pow(2.0, rndFactor * scatterRange);
             g.amp = 0.4;
             g.pan = (((int)(r >> 16) % 513) / 512.0 - 0.5) * scatN;
             return;
@@ -557,7 +585,7 @@ void VoiceLayer::spawnGrain(int layerIdx, const ParamPointers& p, bool useSample
 
 double VoiceLayer::processGranular(double hz, int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept
 {
-    juce::ignoreUnused(hz);
+    // FIX 2: Removed juce::ignoreUnused(hz)
     const float densN = readFloatAP(p.layerGranDensity[layerIdx], 0.5f);
     const bool freeze = readBoolNorm(p.layerGranFreeze[layerIdx], false);
     if (freeze)
@@ -578,7 +606,7 @@ double VoiceLayer::processGranular(double hz, int layerIdx, const ParamPointers&
     grainSpawnCounter++;
     const int baseIv = juce::jmax(1, (int)(sr / (4.0 + (double)densN * 80.0)));
     if ((grainSpawnCounter % baseIv) == 0)
-        spawnGrain(layerIdx, p, useSampleSource);
+        spawnGrain(hz, layerIdx, p, useSampleSource);
 
     double sumL = 0, sumR = 0;
     for (auto& g : grains)
@@ -670,7 +698,7 @@ void VoiceLayer::renderAdd(double& outL,
                            const ParamPointers& p,
                            float modMatrixCutSemi,
                            float modMatrixResAdd,
-                           float modMatrixPitchSemi,
+                           double modMatrixPitchFactor,
                            float modMatrixAmpMul,
                            float modMatrixPanAdd) noexcept
 {
@@ -679,7 +707,7 @@ void VoiceLayer::renderAdd(double& outL,
 
     updateAdsrTargets(layerIndex, p);
 
-    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, modMatrixPitchSemi, cachedFineTuneFactor);
+    glideTargetHz = computeTargetHz(midiNote, layerIndex, p, modMatrixPitchFactor, cachedFineTuneFactor);
     const float portSec = p.synthPortamento != nullptr
                               ? readFloatAP(p.synthPortamento, 0.f)
                               : 0.f;
@@ -819,6 +847,27 @@ void VoiceLayer::renderAdd(double& outL,
 
     lastAmpEnvOut = (float)ampEnv;
     lastFiltEnvOut = (float)filtEnv;
+}
+
+// Task 017: Multi-sample mapping implementation
+void VoiceLayer::selectSampleFromKeymap(int midiNote, float velocity, const SampleKeymap& keymap)
+{
+    // Find the best sample zone for this note and velocity
+    const SampleZone* zone = keymap.findZone(midiNote, (int)(velocity * 127.f));
+    
+    if (zone != nullptr && zone->file.existsAsFile())
+    {
+        // Load the sample from the selected zone
+        currentSampleZone = zone;
+        samplePlayer.loadNow(-1, zone->file.getFullPathName(), zone->rootNote, 
+                            zone->loopEnabled, zone->oneShot, zone->startFrac, zone->endFrac);
+    }
+    else
+    {
+        // No zone found, clear current sample
+        currentSampleZone = nullptr;
+        samplePlayer.loadNow(-1, "", 60, false, false, 0.f, 1.f);
+    }
 }
 
 } // namespace wolfsden

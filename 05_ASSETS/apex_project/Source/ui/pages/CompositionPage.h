@@ -130,6 +130,7 @@ private:
     static constexpr int kMaxAuditionPads = 16;
     std::array<juce::TextButton, kMaxAuditionPads> audPads;
     std::vector<int> currentChordSequence;
+    std::vector<int> currentRootSequence;  // ADD THIS
     int currentRootKey = 0;
 
     // --- Drag state (audition pad → slot tracking via MouseListener) ---

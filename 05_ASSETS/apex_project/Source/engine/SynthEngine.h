@@ -4,12 +4,15 @@
 #include "synth/SynthDSP.h"
 #include "synth/VoiceLayer.h"
 #include "samples/WDSampleLibrary.h"
+#include "samples/SampleKeymap.h"
+#include "synth/WavetableBank.h"
 
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <array>
 #include <mutex>
+#include <vector>
 
 namespace wolfsden
 {
@@ -48,7 +51,22 @@ public:
                           int rootNoteMidi, bool loopEnabled, bool oneShot,
                           float startFrac = 0.f, float endFrac = 1.f);
 
+    /** Add a sample zone to a layer's keymap (message thread only). */
+    void addSampleZone(int layerIndex, const SampleZone& zone);
+    
+    /** Clear all zones from a layer's keymap (message thread only). */
+    void clearSampleKeymap(int layerIndex);
+
     WDSampleLibrary& getSampleLibrary() noexcept { return sampleLibrary; }
+    
+    /** Get a layer's keymap for UI purposes (message thread only). */
+    const SampleKeymap& getLayerKeymap(int layerIndex) const;
+    
+    /** Get a layer's keymap for loading (non-const version). */
+    SampleKeymap& getLayerKeymap(int layerIndex);
+
+    void setLayerWavetable(int layerIndex, int tableIndexA, int tableIndexB);
+    void loadLayerWavetableFromFile(int layerIndex, int slot, const juce::File& file);
 
     SynthEngine(const SynthEngine&) = delete;
     SynthEngine& operator=(const SynthEngine&) = delete;
@@ -56,7 +74,7 @@ public:
 private:
     static constexpr int kNumVoices = 16;
     static constexpr int kNumLayers = 4;
-    static constexpr int kWtSize = 2048;
+    static constexpr int kWtSize = 256; // Updated to match WavetableBank
     static constexpr int kGranSize = 16384;
 
     struct Voice
@@ -69,8 +87,6 @@ private:
     };
 
     void bindParameterPointers(juce::AudioProcessorValueTreeState& apvts);
-    void fillWavetable() noexcept;
-    void fillWavetableB() noexcept;
     void fillGranularSource() noexcept;
 
     int voicePolyLimit() const noexcept;
@@ -83,8 +99,9 @@ private:
     double sampleRate = 44100.0;
     int maxBlock = 512;
 
-    std::array<double, kWtSize> wavetable {};
-    std::array<double, kWtSize> wavetableB {};
+    std::array<std::vector<double>, 4> wtBufA;
+    std::array<std::vector<double>, 4> wtBufB;
+
     std::array<double, kGranSize> granularBuffer {};
     std::array<Voice, kNumVoices> voices {};
     wolfsden::dsp::Lfo globalLfo;
@@ -104,6 +121,9 @@ private:
     bool pointersBound = false;
 
     WDSampleLibrary sampleLibrary;
+
+    /** Keymaps for each layer - stores sample zones for multi-sample mapping */
+    std::array<SampleKeymap, 4> layerKeymaps;
 
     /** One in-flight layer load at a time — overlapping Thread::launch calls interleave loadNow and corrupt buffers. */
     std::mutex layerSampleLoadMutex;

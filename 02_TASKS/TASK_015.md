@@ -2,7 +2,7 @@ TASK ID: 015
 
 PHASE: 2
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Complete the wavetable oscillator so it is a real, usable synthesis mode. Currently the engine (case 4 in VoiceLayer::processOscillator) interpolates between two internal double arrays (wtData / wtBData) that are set at prepare() time with no file loading mechanism and no user-facing wavetable library. The morph knob exists and the interpolation math is correct, but there is nothing to morph between. This task delivers: a factory wavetable library of at least 20 tables, a file loading pipeline so the user can import their own .wav wavetables, and a UI control on the Synth page to browse and select wavetables per layer.

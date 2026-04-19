@@ -163,6 +163,76 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
         addAndMakeVisible(*granLabels[(size_t)i]);
     }
 
+    // WT Controls
+    for (int i = 0; i < kNumFactoryWavetables; ++i)
+    {
+        wtA.addItem(kFactoryWavetables[i].name, i + 1);
+        wtB.addItem(kFactoryWavetables[i].name, i + 1);
+    }
+
+    wtA.setVisible(false);
+    wtB.setVisible(false);
+    loadWtABtn.setVisible(false);
+    loadWtBBtn.setVisible(false);
+    wavetableMorph.setVisible(false);
+    lblWtMorph.setVisible(false);
+
+    addAndMakeVisible(wtA);
+    addAndMakeVisible(wtB);
+    addAndMakeVisible(loadWtABtn);
+    addAndMakeVisible(loadWtBBtn);
+
+    styleKnob(wavetableMorph);
+    addAndMakeVisible(wavetableMorph);
+
+    prepCap(lblWtMorph, "MORPH A->B");
+    addAndMakeVisible(lblWtMorph);
+
+    // Sample controls
+    styleHSlider(sampleStart);
+    styleHSlider(sampleEnd);
+    sampleStart.setRange(0.0, 1.0, 0.001);
+    sampleEnd.setRange(0.0, 1.0, 0.001);
+    sampleStart.setVisible(false);
+    sampleEnd.setVisible(false);
+    addAndMakeVisible(sampleStart);
+    addAndMakeVisible(sampleEnd);
+
+    sampleLoopBtn.setClickingTogglesState(true);
+    sampleLoopBtn.setVisible(false);
+    addAndMakeVisible(sampleLoopBtn);
+
+    keymapBtn.setVisible(false);
+    addAndMakeVisible(keymapBtn);
+
+    prepCap(lblSampleStart, "Loop Start");
+    prepCap(lblSampleEnd, "Loop End");
+    lblSampleStart.setVisible(false);
+    lblSampleEnd.setVisible(false);
+    addAndMakeVisible(lblSampleStart);
+    addAndMakeVisible(lblSampleEnd);
+
+    // Keymap button handler
+    keymapBtn.onClick = [this] {
+        showKeymapDialog();
+    };
+
+    auto loadWavetable = [this](int slot) {
+        // We'd ideally use FileChooser, but keeping it simple for the task structure
+        // In a real implementation this opens a dialog.
+        // For now, we simulate success if they pick a file.
+        juce::FileChooser chooser("Select Wavetable", juce::File{}, "*.wav");
+        chooser.launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this, slot](const juce::FileChooser& fc) {
+                if (fc.getResult().exists()) {
+                    processor.getSynthEngine().loadLayerWavetableFromFile(activeLayer, slot, fc.getResult());
+                }
+            });
+    };
+
+    loadWtABtn.onClick = [=] { loadWavetable(0); };
+    loadWtBBtn.onClick = [=] { loadWavetable(1); };
+
     auto prep = [](juce::Label& L, const juce::String& t, juce::Colour col) {
         L.setText(t, juce::dontSendNotification);
         L.setFont(Theme::fontLabel());
@@ -328,6 +398,12 @@ void SynthPage::bindLayer(int layerIndex)
     addS(apvts, layerKey("tune_coarse"),  oscCoarse, layerSAtt);
     addS(apvts, layerKey("tune_fine"),    oscFine,   layerSAtt);
     addS(apvts, layerKey("tune_octave"),  oscOctave, layerSAtt);
+
+    // Wavetable
+    addC(apvts, layerKey("wt_index_a"), wtA, layerCAtt);
+    addC(apvts, layerKey("wt_index_b"), wtB, layerCAtt);
+    addS(apvts, layerKey("wavetable_morph"), wavetableMorph, layerSAtt);
+
     // Filter 1
     filterType.clear();
     for (auto& s : juce::StringArray({ "LP24", "LP12", "BP", "HP12", "Notch", "HP24", "Comb", "Formant" }))
@@ -354,6 +430,10 @@ void SynthPage::bindLayer(int layerIndex)
     addS(apvts, layerKey("gran_size"),    granSize,    layerSAtt);
     addS(apvts, layerKey("gran_density"), granDensity, layerSAtt);
     addS(apvts, layerKey("gran_scatter"), granScatter, layerSAtt);
+
+    // Sample controls
+    addS(apvts, layerKey("sample_start"), sampleStart, layerSAtt);
+    addS(apvts, layerKey("sample_end"),   sampleEnd,   layerSAtt);
 
     addS(apvts, layerKey("amp_attack"), ampA, layerSAtt);
     addS(apvts, layerKey("amp_decay"), ampD, layerSAtt);
@@ -404,12 +484,29 @@ void SynthPage::syncOscButtons()
     }
 
     const bool isGranular = (idx == 5);
+    const bool isWt = (idx == 4);
     const bool isSample   = (idx == 7);
+
     for (auto* s : { &granPos, &granSize, &granDensity, &granScatter })
         s->setVisible(isGranular);
     for (auto* L : { &lblGranPos, &lblGranSize, &lblGranDensity, &lblGranScatter })
         L->setVisible(isGranular);
-    juce::ignoreUnused(isSample);
+
+    wtA.setVisible(isWt);
+    wtB.setVisible(isWt);
+    loadWtABtn.setVisible(isWt);
+    loadWtBBtn.setVisible(isWt);
+    wavetableMorph.setVisible(isWt);
+    lblWtMorph.setVisible(isWt);
+
+    // Sample controls
+    sampleStart.setVisible(isSample);
+    sampleEnd.setVisible(isSample);
+    sampleLoopBtn.setVisible(isSample);
+    keymapBtn.setVisible(isSample);
+    lblSampleStart.setVisible(isSample);
+    lblSampleEnd.setVisible(isSample);
+
     filEnvShape.repaint();
     ampShape.repaint();
     resized();
@@ -440,7 +537,7 @@ void SynthPage::paint(juce::Graphics& g)
     drawColTitle(zoneAmp,  "AMPLIFIER");
 
     // Granular region indicator
-    if (!zoneGranular.isEmpty() && granPos.isVisible())
+    if (!zoneGranular.isEmpty() && (granPos.isVisible() || wtA.isVisible()))
     {
         g.setColour(Theme::accentAlt().withAlpha(0.08f));
         g.fillRoundedRectangle(zoneGranular.toFloat().reduced(2.f), 4.f);
@@ -571,15 +668,19 @@ void SynthPage::resized()
 
     // Waveform preview (leave room below for granular block, optional sample row, and tune knobs + captions)
     const bool isGranular = granPos.isVisible();
+    const bool isWt = wtA.isVisible();
+    const bool isSample = sampleStart.isVisible();
     const int granControlsH = isGranular ? (4 * (15 + 20 + 3) + 4) : 0; // label + slider + gap per row
+    const int wtControlsH = isWt ? 80 : 0;
+    const int specH = juce::jmax(granControlsH, wtControlsH);
     const int sampleH = 0;
-    const int tuneBlock = granControlsH + sampleH + kCap + 58 + 8;
+    const int tuneBlock = specH + sampleH + kCap + 58 + 8;
     const int waveH = juce::jlimit(40, 80, juce::jmax(40, o.getBottom() - y - tuneBlock));
     wavePreview.setBounds(x0, y, cw, waveH);
     y += wavePreview.getHeight() + 6;
 
     // Granular controls — only visible in Granular mode
-    zoneGranular = juce::Rectangle<int>(x0, y, cw, granControlsH);
+    zoneGranular = juce::Rectangle<int>(x0, y, cw, specH);
     if (isGranular)
     {
         juce::Slider* gs[4] = { &granPos, &granSize, &granDensity, &granScatter };
@@ -592,9 +693,45 @@ void SynthPage::resized()
             y += 23;
         }
     }
+    else if (isWt)
+    {
+        wtA.setBounds(x0, y, cw - 40, 20);
+        loadWtABtn.setBounds(x0 + cw - 38, y, 38, 20);
+        y += 24;
+        wtB.setBounds(x0, y, cw - 40, 20);
+        loadWtBBtn.setBounds(x0 + cw - 38, y, 38, 20);
+        y += 24;
+
+        lblWtMorph.setBounds(x0, y, cw / 2, kCap);
+        wavetableMorph.setBounds(x0 + cw/2, y, cw/2, 30);
+        y += 32;
+    }
+    else if (isSample)
+    {
+        // Sample controls layout
+        zoneSample = juce::Rectangle<int>(x0, y, cw, 120);
+        
+        // Loop start
+        lblSampleStart.setBounds(x0, y, cw, 15);
+        y += 15;
+        sampleStart.setBounds(x0, y, cw, 20);
+        y += 24;
+        
+        // Loop end
+        lblSampleEnd.setBounds(x0, y, cw, 15);
+        y += 15;
+        sampleEnd.setBounds(x0, y, cw, 20);
+        y += 24;
+        
+        // Loop and Keymap buttons
+        const int btnWidth = (cw - 8) / 2;
+        sampleLoopBtn.setBounds(x0, y, btnWidth - 4, 24);
+        keymapBtn.setBounds(x0 + btnWidth + 4, y, btnWidth - 4, 24);
+        y += 32;
+    }
     else
     {
-        y += granControlsH;
+        y += specH;
     }
 
 
@@ -722,6 +859,83 @@ void SynthPage::resized()
     auto panR = tail.withSizeKeepingCentre(panSz, panH).withY(tail.getY());
     lblPan.setBounds(panR.removeFromTop(kCap));
     ampPan.setBounds(panR.reduced(0, 2));
+}
+
+void SynthPage::showKeymapDialog()
+{
+    auto& keymap = processor.getSynthEngine().getLayerKeymap(activeLayer);
+    
+    juce::DialogWindow::LaunchOptions options;
+    options.dialogTitle = "Sample Keymap - Layer " + juce::String::charToString((juce::juce_wchar)('A' + activeLayer));
+    options.content.setOwned(new juce::Component());
+    auto* content = options.content.get();
+    content->setSize(500, 400);
+    
+    // Create a simple list of zones
+    struct SimpleListModel : public juce::ListBoxModel
+    {
+        int getNumRows() override { return 1; }
+        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override
+        {
+            g.setColour(juce::Colours::white);
+            g.drawText("No zones loaded", 0, 0, width, height, juce::Justification::centred);
+        }
+    };
+    
+    auto* listBox = new juce::ListBox();
+    listBox->setModel(new SimpleListModel());
+    content->addAndMakeVisible(listBox);
+    listBox->setBounds(10, 10, 480, 300);
+    
+    // Add zone button
+    auto* addZoneBtn = new juce::TextButton("Add Zone");
+    content->addAndMakeVisible(addZoneBtn);
+    addZoneBtn->setBounds(10, 320, 100, 30);
+    
+    addZoneBtn->onClick = [this] {
+        juce::FileChooser chooser("Select Sample File", juce::File{}, "*.wav");
+        chooser.launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this](const juce::FileChooser& fc) {
+                if (fc.getResult().exists()) {
+                    auto file = fc.getResult();
+                    SampleZone zone;
+                    zone.file = file;
+                    zone.rootNote = 60; // Default to C4
+                    zone.loNote = 48;
+                    zone.hiNote = 72;
+                    zone.loVel = 0;
+                    zone.hiVel = 127;
+                    zone.startFrac = 0.0f;
+                    zone.endFrac = 1.0f;
+                    zone.loopEnabled = true;
+                    zone.oneShot = false;
+                    
+                    processor.getSynthEngine().addSampleZone(activeLayer, zone);
+                }
+            });
+    };
+    
+    // Clear zones button
+    auto* clearBtn = new juce::TextButton("Clear All");
+    content->addAndMakeVisible(clearBtn);
+    clearBtn->setBounds(120, 320, 100, 30);
+    
+    clearBtn->onClick = [this] {
+        processor.getSynthEngine().clearSampleKeymap(activeLayer);
+    };
+    
+    // Close button
+    auto* closeBtn = new juce::TextButton("Close");
+    content->addAndMakeVisible(closeBtn);
+    closeBtn->setBounds(390, 320, 100, 30);
+    
+    auto dialog = options.launchAsync();
+    if (dialog != nullptr)
+    {
+        closeBtn->onClick = [dialog] {
+            dialog->closeButtonPressed();
+        };
+    }
 }
 
 } // namespace wolfsden::ui

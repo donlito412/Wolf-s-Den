@@ -37,9 +37,9 @@ Tasks 001–010 executed. Full JUCE plugin built: synthesis engine, theory engin
 Real-world DAW testing (Logic Pro) revealed three critical failures that block release. Phase 2 addresses these exclusively before any scope expansion.
 
 **Open bugs from Logic Pro testing [2026-04-18]:**
-- BUG_P2_001 (CRITICAL): Genre selection on Composition page does nothing — no progressions, no sound. No real genre→chord progression library exists. → TASK_012
-- BUG_P2_002 (HIGH): Arpeggiator at fast BPM settings corrupts the preset sound — voice accumulation / note-off failure causes timbral drift. Slow arp works. → TASK_011
-- BUG_P2_003 (HIGH): CPU 45–55% on Apple M1 under normal playing. Phase 1 target was <20%. Profiling and optimization required. → TASK_013
+- BUG_P2_001 (CRITICAL): Genre selection on Composition page does nothing — no progressions, no sound. TASK_012 marked done but still broken: data model confirmed wrong (no per-chord root offsets), UI call order bug confirmed. → TASK_020 (supersedes TASK_012)
+- BUG_P2_002 (HIGH): Arpeggiator pattern broken with chord mode — plays same note/octave pattern instead of cycling through chord tones musically. TASK_011 marked done but octave cycling formula confirmed wrong at MidiPipeline.cpp line 577. → TASK_019 (follow-up to TASK_011)
+- BUG_P2_003 (HIGH): CPU 45–55% on Apple M1. TASK_013 marked done but only RC1-fineTune/RC2/RC3 applied. RC1-modMatrix, RC4-Compressor, RC4b-Gate, RC5-HighPass/LowPass, RC6-LFO all still unoptimized. → TASK_021 (supersedes TASK_013)
 
 **Additional Phase 2 work:**
 - Dead code and unused stubs removed from the codebase → TASK_014
@@ -50,17 +50,20 @@ Real-world DAW testing (Logic Pro) revealed three critical failures that block r
 
 # PHASE 2 TASK ORDER
 Priority order (bugs block release, DSP depth and Windows are parallel):
-1. TASK_011 — Arp fix (DONE)
-2. TASK_013 — CPU optimization (blocks all real-world use)
-3. TASK_012 — Genre progressions (core feature gap)
-4. TASK_014 — Dead code removal (clean codebase before DSP work)
-5. TASK_015 — Wavetable I/O
-6. TASK_016 — Granular depth
-7. TASK_017 — Sample playback depth
-8. TASK_018 — Windows build (can run in parallel with 015–017)
+1. TASK_011 — Arp fix (DONE — partial; octave cycling still wrong)
+2. TASK_019 — Arp octave cycling formula fix (one line, MidiPipeline.cpp:577)
+3. TASK_013 — CPU optimization (DONE — partial; RC1-modMatrix/RC4/RC5/RC6 still pending)
+4. TASK_021 — CPU remaining fixes (modMatrix pow + FxEngine exp/pow/sin)
+5. TASK_012 — Genre progressions (DONE — partial; data model wrong, UI call order wrong)
+6. TASK_020 — Progression fix (per-chord root offsets + UI call order fix)
+7. TASK_014 — Dead code removal (clean codebase before DSP work)
+8. TASK_015 — Wavetable I/O
+9. TASK_016 — Granular depth
+10. TASK_017 — Sample playback depth
+11. TASK_018 — Windows build (can run in parallel with 015–017)
 
 # NEXT MILESTONE
-Complete TASK_011–018 (Phase 2). Plugin is not release-ready until all three DAW-confirmed bugs are resolved (TASK_011 done, TASK_012 and TASK_013 remaining).
+Complete TASK_019, TASK_020, TASK_021 (bug fix completions). Plugin is not release-ready until all three DAW-confirmed bugs are fully resolved.
 
 # QUALITY BAR (NON-NEGOTIABLE)
 - If it’s in the build under a given name, it must **work properly** at a level fit for professional use.

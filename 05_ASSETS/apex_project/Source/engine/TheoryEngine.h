@@ -75,7 +75,8 @@ struct ProgressionListing
     std::string mood;
     int energy = 2;
     int rootKey = 0;
-    std::vector<int> chordSequence; // parsed JSON array of chord_id values
+    std::vector<int> chordSequence;  // chord_type_id per position
+    std::vector<int> rootSequence;   // semitone offset from rootKey per position (0-11)
 };
 
 /** One row from `packs` — a factory or expansion content pack. */

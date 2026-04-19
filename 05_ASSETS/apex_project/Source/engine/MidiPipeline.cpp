@@ -574,7 +574,7 @@ void MidiPipeline::fireArpStep(juce::MidiBuffer& out,
     const int vel = readStepVel(step);
     const float vNorm = (float)vel / 127.f;
     const int nOct = juce::jmax(1, readArpOctaves());
-    const int octShift = (int)(((uint32_t)arpNoteWalk % (uint32_t)nOct) * 12u);
+    const int octShift = (int)(((uint32_t)arpNoteWalk / (uint32_t)juce::jmax(1, nNotes) % (uint32_t)nOct) * 12u);
     const int trn = readStepTrn(step);
 
     const double maxGate = juce::jmax(1.0, samplesPerArpStep * 0.9);

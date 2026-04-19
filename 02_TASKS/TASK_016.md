@@ -2,7 +2,7 @@ TASK ID: 016
 
 PHASE: 2
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Complete the granular oscillator so grain pitch tracks the played MIDI note and the scatter control produces meaningful, audible randomization. Currently grains play from the source audio at their internal read speed regardless of what MIDI note is pressed — the `hz` parameter is explicitly ignored (`juce::ignoreUnused(hz)` at line 541 of VoiceLayer.cpp). The result is a granular engine that produces the right texture but at the wrong pitch. This task fixes pitch tracking and makes scatter (position jitter + speed variance) work with musically useful ranges.

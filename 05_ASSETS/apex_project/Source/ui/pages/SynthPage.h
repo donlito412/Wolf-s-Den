@@ -59,6 +59,7 @@ private:
     void clearLayerBindings();
     void bindLayer(int layerIndex);
     void syncOscButtons();
+    void showKeymapDialog();
     juce::String layerKey(const juce::String& tail) const;
 
     static void styleKnob(juce::Slider& s);
@@ -83,9 +84,22 @@ private:
     juce::ToggleButton granFreeze { "Freeze" };
     juce::Slider granPos, granSize, granDensity, granScatter;
     juce::Label  lblGranPos, lblGranSize, lblGranDensity, lblGranScatter;
+
+    // Wavetable-specific controls
+    juce::ComboBox wtA, wtB;
+    juce::TextButton loadWtABtn { "Load" };
+    juce::TextButton loadWtBBtn { "Load" };
     juce::Slider wavetableMorph;
     juce::Label  lblWtMorph;
+
+    // Sample-specific controls (visible only when osc mode == Sample)
+    juce::Slider sampleStart, sampleEnd;
+    juce::TextButton sampleLoopBtn { "Loop" };
+    juce::TextButton keymapBtn { "Keymap" };
+    juce::Label lblSampleStart, lblSampleEnd;
+
     juce::Rectangle<int> zoneGranular;
+    juce::Rectangle<int> zoneSample;
 
     // Filter 1
     juce::ComboBox filterType;

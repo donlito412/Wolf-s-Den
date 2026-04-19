@@ -50,7 +50,14 @@ inline double beatsForSyncDivIndex(int divIdx) noexcept
 }
 } // namespace
 
-SynthEngine::SynthEngine() = default;
+SynthEngine::SynthEngine()
+{
+    for (int i = 0; i < kNumLayers; ++i)
+    {
+        wtBufA[(size_t)i].resize(kWtSize, 0.0);
+        wtBufB[(size_t)i].resize(kWtSize, 0.0);
+    }
+}
 
 int SynthEngine::countActiveVoices() const noexcept
 {
@@ -91,7 +98,6 @@ void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvt
     ptrs.lfoDelay = apvts.getRawParameterValue("lfo_delay");
     ptrs.lfoFade = apvts.getRawParameterValue("lfo_fade");
     ptrs.lfoRetrigger = apvts.getRawParameterValue("lfo_retrigger");
-
 
     for (int i = 0; i < kNumLayers; ++i)
     {
@@ -134,33 +140,10 @@ void SynthEngine::bindParameterPointers(juce::AudioProcessorValueTreeState& apvt
         ptrs.layerUnisonDetune[(size_t)i] = apvts.getRawParameterValue(p + "unison_detune");
         ptrs.layerUnisonSpread[(size_t)i] = apvts.getRawParameterValue(p + "unison_spread");
 
+        ptrs.layerWtIndexA[(size_t)i] = apvts.getRawParameterValue(p + "wt_index_a");
+        ptrs.layerWtIndexB[(size_t)i] = apvts.getRawParameterValue(p + "wt_index_b");
     }
     pointersBound = true;
-}
-
-void SynthEngine::fillWavetable() noexcept
-{
-    for (int i = 0; i < kWtSize; ++i)
-    {
-        const double ph = (double)i / (double)kWtSize;
-        const double a1 = std::sin(dsp::twoPi * ph);
-        const double a3 = std::sin(dsp::twoPi * ph * 3.0) * 0.25;
-        const double a5 = std::sin(dsp::twoPi * ph * 5.0) * 0.12;
-        wavetable[(size_t)i] = (a1 + a3 + a5) * 0.55;
-    }
-}
-
-void SynthEngine::fillWavetableB() noexcept
-{
-    for (int i = 0; i < kWtSize; ++i)
-    {
-        const double ph = (double)i / (double)kWtSize;
-        const double sq = ph < 0.5 ? 1.0 : -1.0;
-        const double a1 = std::sin(dsp::twoPi * ph) * 0.45;
-        const double a2 = std::sin(dsp::twoPi * ph * 2.0) * 0.35;
-        const double a4 = std::sin(dsp::twoPi * ph * 4.0) * 0.2;
-        wavetableB[(size_t)i] = juce::jlimit(-1.0, 1.0, (a1 + a2 + a4 + sq * 0.08) * 0.5);
-    }
 }
 
 void SynthEngine::fillGranularSource() noexcept
@@ -168,7 +151,7 @@ void SynthEngine::fillGranularSource() noexcept
     uint32_t s = 0xACE1u;
     for (int i = 0; i < kGranSize; ++i)
     {
-        const double wt = wavetable[(size_t)(i % kWtSize)];
+        const double wt = std::sin(dsp::twoPi * (double)i / 2048.0);
         s ^= s << 13;
         s ^= s >> 17;
         s ^= s << 5;
@@ -182,8 +165,14 @@ void SynthEngine::prepare(double sr, int samplesPerBlock, juce::AudioProcessorVa
     sampleRate = sr;
     maxBlock = juce::jmax(1, samplesPerBlock);
     bindParameterPointers(apvts);
-    fillWavetable();
-    fillWavetableB();
+
+    for (int i = 0; i < kNumLayers; ++i)
+    {
+        int wtA = ptrs.layerWtIndexA[(size_t)i] ? (int)std::lround(ptrs.layerWtIndexA[(size_t)i]->load()) : 0;
+        int wtB = ptrs.layerWtIndexB[(size_t)i] ? (int)std::lround(ptrs.layerWtIndexB[(size_t)i]->load()) : 0;
+        setLayerWavetable(i, wtA, wtB);
+    }
+
     fillGranularSource();
     globalLfo.setSampleRate(sr);
     globalLfo.setShape(0);
@@ -198,9 +187,9 @@ void SynthEngine::prepare(double sr, int samplesPerBlock, juce::AudioProcessorVa
         v.age = 0;
         for (int L = 0; L < kNumLayers; ++L)
             v.layers[(size_t)L].prepare(sr,
-                                        wavetable.data(),
+                                        wtBufA[(size_t)L].data(),
                                         kWtSize,
-                                        wavetableB.data(),
+                                        wtBufB[(size_t)L].data(),
                                         kWtSize,
                                         granularBuffer.data(),
                                         kGranSize,
@@ -276,10 +265,39 @@ void SynthEngine::startVoice(int voiceIndex, int note, float velocity, bool soft
     v.midiNote = note;
     v.velocity = velocity;
     v.age = 0;
+    
+    // Convert velocity to 0-127 range for zone selection
+    const int velocity127 = static_cast<int>(velocity * 127.0f);
+    
     for (int L = 0; L < kNumLayers; ++L)
     {
+        // Check if this layer is in sample mode (osc type 7)
+        const int oscType = readChoiceIndex(ptrs.layerOsc[L], 9, 0);
+        
+        if (oscType == 7) // Sample mode
+        {
+            // Find the best zone for this note and velocity
+            const SampleZone* zone = layerKeymaps[(size_t)L].findZone(note, velocity127);
+            
+            if (zone != nullptr)
+            {
+                // Load the zone's sample into this voice's layer
+                // Use a unique sample ID based on layer and voice to avoid conflicts
+                const int sampleId = 1000 + L * 100 + voiceIndex;
+                v.layers[(size_t)L].loadSample(sampleId, 
+                                               zone->file.getFullPathName(),
+                                               zone->rootNote,
+                                               zone->loopEnabled,
+                                               zone->oneShot,
+                                               zone->startFrac,
+                                               zone->endFrac);
+            }
+        }
+        
         if (softSteal && wasActive)
             v.layers[(size_t)L].noteOnSteal(note, velocity, L, ptrs, ae, fe);
+        else if (oscType == 7) // Sample mode - use multi-sample mapping
+            v.layers[(size_t)L].noteOn(note, velocity, L, ptrs, layerKeymaps[(size_t)L]);
         else
             v.layers[(size_t)L].noteOn(note, velocity, L, ptrs);
     }
@@ -373,6 +391,8 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
 
     const bool legato = readBoolNorm(ptrs.synthLegato, false);
 
+
+
     for (int i = 0; i < numSamples; ++i)
     {
         while (evIx < numEv && events[evIx].pos == i)
@@ -411,7 +431,14 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                     v0.velocity = m.getFloatVelocity();
                     v0.age = 0;
                     for (int L = 0; L < kNumLayers; ++L)
-                        v0.layers[(size_t)L].noteOnLegato(note, m.getFloatVelocity(), L, ptrs);
+                    {
+                        // Check if this layer is in sample mode (osc type 7)
+                        const int oscType = readChoiceIndex(ptrs.layerOsc[L], 9, 0);
+                        if (oscType == 7) // Sample mode - use multi-sample mapping
+                            v0.layers[(size_t)L].noteOnLegato(note, m.getFloatVelocity(), L, ptrs, layerKeymaps[(size_t)L]);
+                        else
+                            v0.layers[(size_t)L].noteOnLegato(note, m.getFloatVelocity(), L, ptrs);
+                    }
                 }
                 else
                 {
@@ -545,6 +572,16 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
         const double gLfoToVoice = gLfoRaw * (double)depthRatio;
         lastGlobalLfoForMod = gLfoRaw;
 
+        // Pre-compute modMatrix pitch factor per layer (RC1-modMatrix fix)
+        double layerPitchFactor[kNumLayers];
+        for (int L = 0; L < kNumLayers; ++L)
+        {
+            const float semiF = layerPitchSemi[(size_t)L];
+            layerPitchFactor[(size_t)L] = (semiF != 0.f)
+                ? std::pow(2.0, (double)semiF / 12.0)
+                : 1.0;
+        }
+
         double layL[4] = {}, layR[4] = {};
         for (auto& v : voices)
         {
@@ -561,7 +598,7 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
                                               ptrs,
                                               layerCutSemi[(size_t)L],
                                               layerResAdd[(size_t)L],
-                                              layerPitchSemi[(size_t)L],
+                                              layerPitchFactor[(size_t)L],
                                               layerAmpMul[(size_t)L],
                                               layerPanAdd[(size_t)L]);
         }
@@ -601,5 +638,119 @@ void SynthEngine::loadLayerSample(int layerIndex,
             v.layers[(size_t)layerIndex].loadSample(sampleId, filePath, rootNoteMidi, loopEnabled, oneShot, startFrac, endFrac);
     });
 }
+
+void SynthEngine::addSampleZone(int layerIndex, const SampleZone& zone)
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers)
+        return;
+
+    layerKeymaps[(size_t)layerIndex].addZone(zone);
+}
+
+void SynthEngine::clearSampleKeymap(int layerIndex)
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers)
+        return;
+
+    layerKeymaps[(size_t)layerIndex].clearZones();
+}
+
+const SampleKeymap& SynthEngine::getLayerKeymap(int layerIndex) const
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers)
+    {
+        static SampleKeymap emptyKeymap;
+        return emptyKeymap;
+    }
+
+    return layerKeymaps[(size_t)layerIndex];
+}
+
+SampleKeymap& SynthEngine::getLayerKeymap(int layerIndex)
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers)
+    {
+        static SampleKeymap emptyKeymap;
+        return emptyKeymap;
+    }
+
+    return layerKeymaps[(size_t)layerIndex];
+}
+
+void SynthEngine::setLayerWavetable(int layerIndex, int tableIndexA, int tableIndexB)
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers) return;
+
+    if (tableIndexA >= 0 && tableIndexA < kNumFactoryWavetables) {
+        std::copy(kFactoryWavetables[tableIndexA].data,
+                  kFactoryWavetables[tableIndexA].data + kWtSize,
+                  wtBufA[(size_t)layerIndex].begin());
+    }
+
+    if (tableIndexB >= 0 && tableIndexB < kNumFactoryWavetables) {
+        std::copy(kFactoryWavetables[tableIndexB].data,
+                  kFactoryWavetables[tableIndexB].data + kWtSize,
+                  wtBufB[(size_t)layerIndex].begin());
+    }
+
+    // Refresh pointers in all voices for this layer
+    for (auto& v : voices) {
+        v.layers[(size_t)layerIndex].prepare(sampleRate,
+                                             wtBufA[(size_t)layerIndex].data(), kWtSize,
+                                             wtBufB[(size_t)layerIndex].data(), kWtSize,
+                                             granularBuffer.data(), kGranSize, maxBlock);
+    }
+}
+
+void SynthEngine::loadLayerWavetableFromFile(int layerIndex, int slot, const juce::File& file)
+{
+    if (layerIndex < 0 || layerIndex >= kNumLayers || slot < 0 || slot > 1) return;
+
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (reader == nullptr) return;
+
+    const int numSamples = (int)reader->lengthInSamples;
+    if (numSamples < 16 || numSamples > 65536) return; // arbitrary reasonable limits
+
+    juce::AudioBuffer<float> tempBuffer(1, numSamples);
+    reader->read(&tempBuffer, 0, numSamples, 0, true, false);
+
+    const float* readPtr = tempBuffer.getReadPointer(0);
+    std::vector<double>& targetBuf = (slot == 0) ? wtBufA[(size_t)layerIndex] : wtBufB[(size_t)layerIndex];
+
+    // Resample to kWtSize and find peak
+    double peak = 0.0;
+    for (int i = 0; i < kWtSize; ++i)
+    {
+        double pos = (double)i * (double)numSamples / (double)kWtSize;
+        int i0 = (int)pos;
+        int i1 = std::min(i0 + 1, numSamples - 1);
+        double frac = pos - i0;
+
+        double val = readPtr[i0] * (1.0 - frac) + readPtr[i1] * frac;
+        targetBuf[(size_t)i] = val;
+
+        if (std::abs(val) > peak) peak = std::abs(val);
+    }
+
+    // Normalize
+    if (peak > 0.0)
+    {
+        for (int i = 0; i < kWtSize; ++i)
+            targetBuf[(size_t)i] /= peak;
+    }
+
+    // Refresh pointers
+    for (auto& v : voices) {
+        v.layers[(size_t)layerIndex].prepare(sampleRate,
+                                             wtBufA[(size_t)layerIndex].data(), kWtSize,
+                                             wtBufB[(size_t)layerIndex].data(), kWtSize,
+                                             granularBuffer.data(), kGranSize, maxBlock);
+    }
+}
+
 
 } // namespace wolfsden

@@ -2,6 +2,7 @@
 
 #include "SynthDSP.h"
 #include "../samples/WDSamplePlayer.h"
+#include "../samples/SampleKeymap.h"
 
 #include <array>
 #include <atomic>
@@ -74,6 +75,8 @@ struct ParamPointers
     std::atomic<float>* layerAS[4] {};
     std::atomic<float>* layerAR[4] {};
 
+    std::atomic<float>* layerWtIndexA[4] {};
+    std::atomic<float>* layerWtIndexB[4] {};
 };
 
 class VoiceLayer
@@ -89,7 +92,9 @@ public:
                  int maxBlockSize = 512) noexcept;
     void reset() noexcept;
     void noteOn(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept;
+    void noteOn(int midiNote, float velocity, int layerIndex, const ParamPointers& p, const SampleKeymap& keymap) noexcept; // Task 017
     void noteOnLegato(int midiNote, float velocity, int layerIndex, const ParamPointers& p) noexcept;
+    void noteOnLegato(int midiNote, float velocity, int layerIndex, const ParamPointers& p, const SampleKeymap& keymap) noexcept; // Task 017
     void noteOff() noexcept;
 
     void noteOnSteal(int midiNote,
@@ -112,6 +117,10 @@ public:
 
     int currentSampleId() const noexcept { return samplePlayer.loadedId(); }
 
+    // Multi-sample mapping methods for Task 017
+    void selectSampleFromKeymap(int midiNote, float velocity, const SampleKeymap& keymap);
+    const SampleZone* getCurrentSampleZone() const noexcept { return currentSampleZone; }
+
     void renderAdd(double& outL,
                    double& outR,
                    int layerIndex,
@@ -122,7 +131,7 @@ public:
                    const ParamPointers& p,
                    float modMatrixCutSemi = 0.f,
                    float modMatrixResAdd = 0.f,
-                   float modMatrixPitchSemi = 0.f,
+                   double modMatrixPitchFactor = 1.0,
                    float modMatrixAmpMul = 1.f,
                    float modMatrixPanAdd = 0.f) noexcept;
 
@@ -224,6 +233,9 @@ private:
     double lfo2FadeProg = 0;
 
     WDSamplePlayer samplePlayer;
+    
+    // Task 017: Multi-sample mapping support
+    const SampleZone* currentSampleZone = nullptr;
 
     void updateAdsrTargets(int layerIndex, const ParamPointers& p) noexcept;
     double readWavetableMorph(double phase01, float morph01) const noexcept;
@@ -239,7 +251,7 @@ private:
                              int& combWritePos,
                              std::array<double, 2048>& combBuf) noexcept;
     static void setBiquadIdentity(wolfsden::dsp::Biquad& b) noexcept;
-    void spawnGrain(int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept;
+    void spawnGrain(double hz, int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept;
     double processGranular(double hz, int layerIdx, const ParamPointers& p, bool useSampleSource) noexcept;
     static double beatsForSyncDivIndex(int divIdx) noexcept;
     static bool readBoolNorm(std::atomic<float>* ap, bool defV) noexcept;

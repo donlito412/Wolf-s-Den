@@ -6,6 +6,17 @@
 
 namespace wolfsden
 {
+
+/** Fast sine approximation (Bhaskara I) - input x in [0, 2*pi].
+ *  Error < 0.2%. Replaces std::sin in LFO hot paths.
+ */
+static inline float fastSin(float x) noexcept
+{
+    x *= 0.15915494f;           // map to [0, 1)
+    x -= std::floor(x);
+    const float s = x < 0.5f ? x * 2.f : 2.f - x * 2.f;
+    return 4.f * s * (1.f - s); // Bhaskara I
+}
 namespace
 {
 inline float readFloatAP(std::atomic<float>* ap, juce::AudioParameterFloat* pf, float defV) noexcept
@@ -55,6 +66,18 @@ struct FxEngine::SlotDSP
     float monoLpL = 0.f, monoLpR = 0.f;
     float lastEqDb[4] { -1000.f, -1000.f, -1000.f, -1000.f };
     bool prepared = false;
+    
+    // Cached compressor coefficients (CPU optimization)
+    float cachedCompAtk = 0.f, cachedCompRel = 0.f;
+    float lastCompP0 = -999.f, lastCompP1 = -999.f;
+    
+    // Cached gate coefficients (CPU optimization)
+    float cachedGateAtk = 0.f, cachedGateRel = 0.f;
+    float lastGateP1 = -999.f, lastGateP2 = -999.f;
+    
+    // Cached filter coefficients (CPU optimization)
+    float cachedHpFreq = 0.f, lastHpP0 = -999.f, lastHpP1 = -999.f;
+    float cachedLpFreq = 0.f, lastLpP0 = -999.f, lastLpP1 = -999.f;
     /** 0 hall, 1 plate, 2 spring — skip setParameters unless changed (less work / fewer internal updates). */
     int revPresetKey = -1;
 
@@ -372,6 +395,64 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
         const float p2 = readP(2);
         const float p3 = readP(3);
 
+        // Pre-compute compressor coefficients (CPU optimization)
+        if (t == FxUnitType::Compressor)
+        {
+            const float p0b = readP(0), p1b = readP(1);
+            if (p0b != st.lastCompP0 || p1b != st.lastCompP1)
+            {
+                st.cachedCompAtk = std::exp(-1.f / (float)(sr * (0.001 + p0b * 0.1)));
+                st.cachedCompRel = std::exp(-1.f / (float)(sr * (0.01 + p1b * 1.0)));
+                st.lastCompP0 = p0b;
+                st.lastCompP1 = p1b;
+            }
+        }
+        
+        // Pre-compute gate coefficients (CPU optimization)
+        if (t == FxUnitType::Gate)
+        {
+            const float p1b = readP(1), p2b = readP(2);
+            if (p1b != st.lastGateP1 || p2b != st.lastGateP2)
+            {
+                st.cachedGateAtk = std::exp(-1.f / (float)(sr * (0.0001 + p1b * 0.01)));
+                st.cachedGateRel = std::exp(-1.f / (float)(sr * (0.001 + p2b * 0.5)));
+                st.lastGateP1 = p1b;
+                st.lastGateP2 = p2b;
+            }
+        }
+        
+        // Pre-compute HighPass filter coefficients (CPU optimization)
+        if (t == FxUnitType::HighPass)
+        {
+            const float p0b = readP(0), p1b = readP(1);
+            if (p0b != st.lastHpP0 || p1b != st.lastHpP1)
+            {
+                st.cachedHpFreq = juce::jlimit(20.f, 20000.f, 20.f * std::pow(1000.f, p0b));
+                st.hpL.setCutoffFrequency(st.cachedHpFreq);
+                st.hpR.setCutoffFrequency(st.cachedHpFreq);
+                st.hpL.setResonance(0.707f + p1b * 4.f);
+                st.hpR.setResonance(0.707f + p1b * 4.f);
+                st.lastHpP0 = p0b;
+                st.lastHpP1 = p1b;
+            }
+        }
+        
+        // Pre-compute LowPass filter coefficients (CPU optimization)
+        if (t == FxUnitType::LowPass)
+        {
+            const float p0b = readP(0), p1b = readP(1);
+            if (p0b != st.lastLpP0 || p1b != st.lastLpP1)
+            {
+                st.cachedLpFreq = juce::jlimit(20.f, 20000.f, 20.f * std::pow(1000.f, p0b));
+                st.lpL.setCutoffFrequency(st.cachedLpFreq);
+                st.lpR.setCutoffFrequency(st.cachedLpFreq);
+                st.lpL.setResonance(0.707f + p1b * 4.f);
+                st.lpR.setResonance(0.707f + p1b * 4.f);
+                st.lastLpP0 = p0b;
+                st.lastLpP1 = p1b;
+            }
+        }
+
         for (int i = 0; i < numSamples; ++i)
         {
             // Simple denormal protection
@@ -392,8 +473,8 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 case FxUnitType::Compressor:
                 {
                     const float det = std::abs(0.5f * (dryL + dryR));
-                    const float atk = std::exp(-1.f / (float)(sr * (0.001 + p0 * 0.1)));
-                    const float rel = std::exp(-1.f / (float)(sr * (0.01 + p1 * 1.0)));
+                    const float atk = st.cachedCompAtk;
+                    const float rel = st.cachedCompRel;
                     st.cEnv = det > st.cEnv ? atk * st.cEnv + (1.f - atk) * det : rel * st.cEnv + (1.f - rel) * det;
                     const float thresh = 0.01f + (1.f - p2) * 0.9f;
                     const float ratio = 1.f + p3 * 19.f;
@@ -417,8 +498,8 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 {
                     const float det = std::abs(0.5f * (dryL + dryR));
                     const float thr = 0.001f + p0 * 0.5f;
-                    const float atk = std::exp(-1.f / (float)(sr * (0.0001 + p1 * 0.01)));
-                    const float rel = std::exp(-1.f / (float)(sr * (0.001 + p2 * 0.5)));
+                    const float atk = st.cachedGateAtk;
+                    const float rel = st.cachedGateRel;
                     const float target = det > thr ? 1.f : 0.f;
                     st.gateEnv = target > st.gateEnv ? atk * st.gateEnv + (1.f - atk) * target
                                                      : rel * st.gateEnv + (1.f - rel) * target;
@@ -438,22 +519,14 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                 }
                 case FxUnitType::HighPass:
                 {
-                    const float f = juce::jlimit(20.f, 20000.f, 20.f * std::pow(1000.f, p0));
-                    st.hpL.setCutoffFrequency(f);
-                    st.hpR.setCutoffFrequency(f);
-                    st.hpL.setResonance(0.707f + p1 * 4.f);
-                    st.hpR.setResonance(0.707f + p1 * 4.f);
+                    // Filter coefficients are pre-computed and cached
                     wetL = st.hpL.processSample(0, dryL);
                     wetR = st.hpR.processSample(0, dryR);
                     break;
                 }
                 case FxUnitType::LowPass:
                 {
-                    const float f = juce::jlimit(20.f, 20000.f, 20.f * std::pow(1000.f, p0));
-                    st.lpL.setCutoffFrequency(f);
-                    st.lpR.setCutoffFrequency(f);
-                    st.lpL.setResonance(0.707f + p1 * 4.f);
-                    st.lpR.setResonance(0.707f + p1 * 4.f);
+                    // Filter coefficients are pre-computed and cached
                     wetL = st.lpL.processSample(0, dryL);
                     wetR = st.lpR.processSample(0, dryR);
                     break;
@@ -504,7 +577,7 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
                     const float modScl = (t == FxUnitType::Vibrato ? 0.005f : 0.002f) * p1;
-                    const float mod = std::sin(st.lfo) * modScl;
+                    const float mod = fastSin(st.lfo) * modScl;
                     const int del = juce::jlimit(1, (int)(sr * 0.05), (int)(sr * (0.01 + mod)));
                     st.dL.pushSample(0, dryL);
                     st.dR.pushSample(0, dryR);
@@ -519,7 +592,7 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
                     const float modScl = 0.001f + p1 * 0.005f;
-                    const float mod = (0.5f + 0.5f * std::sin(st.lfo)) * (float)(sr * modScl);
+                    const float mod = (0.5f + 0.5f * fastSin(st.lfo)) * (float)(sr * modScl);
                     const float fb = p2 * 0.85f;
                     st.dL.pushSample(0, softClip(dryL + st.fbL * fb));
                     st.dR.pushSample(0, softClip(dryR + st.fbR * fb));
@@ -535,7 +608,7 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float coef = 0.1f + p1 * 0.85f + 0.05f * std::sin(st.lfo);
+                    const float coef = 0.1f + p1 * 0.85f + 0.05f * fastSin(st.lfo);
                     auto ap = [&](float x, int k) {
                         const float y = coef * (x - st.phz[(size_t)k]) + st.phz[(size_t)k];
                         st.phz[(size_t)k] = y;
@@ -551,7 +624,7 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     st.lfo += juce::MathConstants<float>::twoPi * rate / (float)sr;
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
-                    const float g = 1.f - p1 * (0.5f + 0.5f * std::sin(st.lfo));
+                    const float g = 1.f - p1 * (0.5f + 0.5f * fastSin(st.lfo));
                     wetL = dryL * g;
                     wetR = dryR * g;
                     break;
@@ -563,7 +636,7 @@ void FxEngine::processRack(juce::AudioBuffer<float>& stereo,
                     if (st.lfo > juce::MathConstants<float>::twoPi)
                         st.lfo -= juce::MathConstants<float>::twoPi;
                     const float depth = p1;
-                    const float p = 0.5f + 0.5f * std::sin(st.lfo) * depth;
+                    const float p = 0.5f + 0.5f * fastSin(st.lfo) * depth;
                     const float gL = std::sqrt(p);
                     const float gR = std::sqrt(1.f - p);
                     wetL = dryL * gL;
