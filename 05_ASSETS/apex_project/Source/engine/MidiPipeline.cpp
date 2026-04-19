@@ -815,7 +815,27 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
     const bool arpWasOff = !lastProcessArpOn;
     if (arpOn && arpWasOff)
     {
-        allNotesOffOutput(out, 0);
+        // Kill chord-mode notes that were sent directly (not via arp) before arp was enabled.
+        // These are tracked in chordMaps[] but NOT in arpNoteActive/arpPolyHeld, so
+        // allNotesOffOutput() misses them. Without these explicit note-offs the synth
+        // keeps playing them, causing a static burst when the arp fires its first note on top.
+        for (int ci = 0; ci < kMaxMap; ++ci)
+        {
+            if (chordMaps[(size_t)ci].used)
+            {
+                for (uint8_t k = 0; k < chordMaps[(size_t)ci].nOut; ++k)
+                    out.addEvent(juce::MidiMessage::noteOff(1, (int)chordMaps[(size_t)ci].outs[(size_t)k]), 0);
+                chordMaps[(size_t)ci] = {};   // clear the slot
+            }
+        }
+        // Kill any single (non-chord) direct noteOns: send noteOff for all held physical notes.
+        // physicalHeld tracks the raw MIDI note number, which is close enough for cleanup.
+        for (int n = 0; n < 128; ++n)
+        {
+            if (physicalHeld[(size_t)n])
+                out.addEvent(juce::MidiMessage::noteOff(1, n), 0);
+        }
+        allNotesOffOutput(out, 0);    // handles arpNoteActive + arpPolyHeld (arp-tracked notes)
         arpTimeInStep = 0;
         arpNoteActive = false;
         arpGateSamplesLeft = 0.0;
@@ -827,6 +847,16 @@ void MidiPipeline::process(juce::MidiBuffer& midi,
 
     if (!arpOn && lastProcessArpOn)
     {
+        // Same cleanup as toggle-on: kill any chord-map notes that may have outlasted the arp.
+        for (int ci = 0; ci < kMaxMap; ++ci)
+        {
+            if (chordMaps[(size_t)ci].used)
+            {
+                for (uint8_t k = 0; k < chordMaps[(size_t)ci].nOut; ++k)
+                    out.addEvent(juce::MidiMessage::noteOff(1, (int)chordMaps[(size_t)ci].outs[(size_t)k]), 0);
+                chordMaps[(size_t)ci] = {};
+            }
+        }
         allNotesOffOutput(out, 0);
         arpNoteActive = false;
         arpGateSamplesLeft = 0.0;

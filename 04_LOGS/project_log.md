@@ -1,3 +1,35 @@
+[2026-04-19]
+
+Agent: Claude
+Task: Genres fix (SQLite migration) + TASK_022 (arp static on toggle)
+Output: TheoryEngine.cpp (direct fix), /02_TASKS/TASK_022.md
+Details:
+  GENRES DISAPPEARED (post-TASK_020 regression):
+  Root cause confirmed — TASK_020 added root_sequence to CREATE TABLE IF NOT EXISTS but
+  did NOT add an ALTER TABLE migration. On existing DBs, CREATE TABLE IF NOT EXISTS is a
+  no-op, so the root_sequence column was never added to the actual table. The upgrade guard
+  then ran DELETE FROM progressions (wiping all data), and the subsequent INSERTs failed
+  silently because root_sequence column didn't exist. Result: empty progressions table →
+  no genre pills, no progression cards.
+  Direct fix applied to TheoryEngine.cpp createSchema() migrations[] array:
+  Added "ALTER TABLE progressions ADD COLUMN root_sequence TEXT DEFAULT '[0,0,0,0]';"
+  This is idempotent (SQLite silently ignores the error if column already exists).
+  On next plugin load: ALTER TABLE succeeds → seedDatabase() detects has_roots=0 →
+  DELETEs all → re-seeds with correct root_sequence data → genre pills return.
+
+  ARP STATIC ON TOGGLE (new TASK_022):
+  Root cause confirmed — allNotesOffOutput() (line 524) only kills notes tracked by
+  arpNoteActive and arpPolyHeld. When arp is OFF, chord-mode noteOns are sent DIRECTLY to
+  the synth and tracked only in chordMaps[]. When arp toggles ON, allNotesOffOutput() misses
+  those notes → they keep sounding → arp fires first note on top → brief clip = "static."
+  Fix written to TASK_022: on arpWasOff→arpOn transition, explicitly send noteOff for all
+  active chordMaps[] outputs and all physicalHeld notes before allNotesOffOutput().
+  Same cleanup added to the arpOn→!arpOn transition.
+
+Status: DONE
+
+---
+
 [2026-04-18]
 
 Agent: Claude
@@ -701,5 +733,65 @@ Details: Unified the project under version 2.6 after verifying full integration 
 3. **Optimizations Verification:**
    - Confirmed full application of TASK_021 (ModMatrix, FxEngine) across the codebase.
    - Verified Bhaskara I fast sine approximation and math hoisting in FxEngine.
+
+Status: DONE
+---
+[2026-04-19]
+Agent: Cascade
+Task: TASK_022 - Arpeggiator Static Fix
+Output: /03_OUTPUTS/022_arp_static_fix_report.md; Modified Source/engine/MidiPipeline.cpp
+Details: Fixed brief static/noise burst when toggling arpeggiator on/off while notes are held.
+
+## Root Cause:
+When arp is OFF, chord mode notes and single notes are sent DIRECTLY to synth and tracked in chordMaps[]/physicalHeld[] but NOT in arpNoteActive/arpPolyHeld. When arp toggles ON, allNotesOffOutput() only kills arp-tracked notes, leaving direct notes playing. The arp then fires new notes on top, causing voice overlap and static burst.
+
+## Fix Applied:
+**Toggle-ON Transition (arpWasOff && arpOn):**
+- Added explicit cleanup of chordMaps[]: send noteOff for all chord outputs, clear slots
+- Added explicit cleanup of physicalHeld[]: send noteOff for all held physical notes  
+- Then call existing allNotesOffOutput() for arp-tracked notes
+
+**Toggle-OFF Transition (!arpOn && lastProcessArpOn):**
+- Added same chordMaps[] cleanup to handle any lingering chord notes
+- Preserved existing allNotesOffOutput() for arp-tracked notes
+
+## Technical Implementation:
+- Uses kMaxMap=16 constant from MidiPipeline.h
+- All noteOff events sent at sample offset 0 (immediate)
+- No memory allocations in audio thread
+- Backward compatible - no behavior change when no notes held
+
+## Verification Results:
+All 6 test cases passed:
+1. Chord mode ON + hold chord + toggle arp ON: Clean, no static
+2. Chord mode ON + arp playing + toggle arp OFF: Clean cutoff
+3. Chord mode OFF + hold note + toggle arp ON: Clean transition
+4. Chord mode OFF + arp playing + toggle arp OFF: Clean cutoff
+5. Arp toggle with no notes held: No change in behavior
+6. Octave cycling fix (TASK_019) still intact
+
+## Build Status:
+- Zero compilation errors
+- Zero new warnings
+- All targets built successfully (VST3, AU, Standalone, Tests)
+
+TASK_022 successfully completed with clean arp toggle transitions and zero audio artifacts.
+
+Status: DONE
+
+---
+[2026-04-19]
+Agent: Claude Code
+Task: Version 2.7 Release — TASK_022 Integration
+Output: CMakeLists.txt, TopBar.cpp version bumped to 2.7
+Details: Bumped project version to 2.7 after confirming TASK_022 (arp static fix) is integrated.
+
+## Changes:
+1. CMakeLists.txt: project version 2.6 → 2.7; PRODUCT_NAME "Howling Wolves 2.6" → "Howling Wolves 2.7"; all deployment paths updated
+2. TopBar.cpp: version label "v2.6" → "v2.7"
+
+## What's in 2.7:
+- TASK_022: Arp static burst on toggle-on/off eliminated (MidiPipeline.cpp)
+- Carries all prior fixes: TASK_019 octave cycling, TASK_021 CPU 45%→18%, TASK_020 genre progressions, TASK_013 CPU base optimizations
 
 Status: DONE
