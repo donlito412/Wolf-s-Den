@@ -1230,6 +1230,11 @@ void TheoryEngine::seedDatabase()
             ins("Chicago",        "Blues","Smooth",     2,"[10,12,10,5]", "[0,9,7,5]");
 
             sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+
+            // Write the new version so we don't reseed on the next launch.
+            sqlite3_exec(db,
+                "INSERT OR REPLACE INTO prog_seed_meta (key, val) VALUES ('version', 3);",
+                nullptr, nullptr, nullptr);
         }
     }
 

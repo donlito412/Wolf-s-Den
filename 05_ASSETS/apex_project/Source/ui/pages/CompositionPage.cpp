@@ -425,7 +425,7 @@ void CompositionPage::selectProgression(int id)
     for (auto* c : browseCards)
         c->setSelected(c->progressionId == id);
 
-    // Find the sequence in cache
+    // Search the in-memory cache first (fast path)
     currentChordSequence.clear();
     currentRootSequence.clear();
     for (const auto& p : cachedProgressions) {
@@ -436,6 +436,29 @@ void CompositionPage::selectProgression(int id)
             break;
         }
     }
+
+    // Fallback: if cache lookup failed or returned empty sequence, query DB directly.
+    // This catches stale-cache scenarios (e.g. DB was reseeded between page loads).
+    if (currentChordSequence.empty())
+    {
+        auto& th = processor.getTheoryEngine();
+        if (th.isDatabaseReady())
+        {
+            for (const auto& p : th.getProgressionListings(""))
+            {
+                if (p.id == id)
+                {
+                    currentChordSequence = p.chordSequence;
+                    currentRootSequence  = p.rootSequence;
+                    currentRootKey       = p.rootKey;
+                    // Refresh cache too so subsequent interactions are fast
+                    cachedProgressions   = th.getProgressionListings(activeGenre.toStdString());
+                    break;
+                }
+            }
+        }
+    }
+
     refreshAuditionPads();
 }
 
