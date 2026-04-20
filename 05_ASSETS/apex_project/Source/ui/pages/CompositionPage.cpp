@@ -739,6 +739,22 @@ void CompositionPage::setupArpControls()
         apvts, "midi_arp_octaves",  arpOct);
     attArpSwing = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         apvts, "midi_arp_swing",    arpSwing);
+
+    // Clean value display (APVTS attachments override Slider defaults — set after binding)
+    masterVol.textFromValueFunction = [](double v) -> juce::String {
+        return juce::String(juce::roundToInt(v * 100.0)) + "%";
+    };
+    masterVol.updateText();
+
+    arpOct.textFromValueFunction = [](double v) -> juce::String {
+        return juce::String(juce::roundToInt(v));
+    };
+    arpOct.updateText();
+
+    arpSwing.textFromValueFunction = [](double v) -> juce::String {
+        return juce::String(juce::roundToInt(v * 100.0)) + "%";
+    };
+    arpSwing.updateText();
 }
 
 // =============================================================================

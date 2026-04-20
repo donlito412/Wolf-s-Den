@@ -374,6 +374,7 @@ SynthPage::SynthPage(WolfsDenAudioProcessor& proc)
 
 
     setActiveLayer(0);
+    applyValueFormatting();
     startTimerHz(15);
     juce::ignoreUnused(processor);
 }
@@ -453,6 +454,9 @@ void SynthPage::bindLayer(int layerIndex)
     for (auto& s : juce::StringArray({ "Sine", "Triangle", "Saw Up", "Square", "Random", "S&H" }))
         lfo2Shape.addItem(s, lfo2Shape.getNumItems() + 1);
     addC(apvts, layerKey("lfo2_shape"), lfo2Shape, layerCAtt);
+
+    // Re-apply formatting after every layer rebind (attachments reset textFromValueFunction).
+    applyValueFormatting();
 }
 
 void SynthPage::setActiveLayer(int layerIndex)
@@ -584,7 +588,11 @@ void SynthPage::resized()
     constexpr int kCap = 12;
 
     const int totalH = getLocalBounds().reduced(kMargin).getHeight();
-    const bool compact = totalH < 480;
+    // 'compact' activates at the minimum resizable height so the layout
+    // never overflows at small window sizes.  The old threshold (480) was
+    // below the effective minimum totalH (~544 at kMinH=560) so it never
+    // triggered — all content would overflow.
+    const bool compact = totalH < 560;
     const int kLfoControlsH = compact ? 52 : 72;
     const int kLfoNoteH = compact ? 12 : 18;
 
@@ -859,6 +867,119 @@ void SynthPage::resized()
     auto panR = tail.withSizeKeepingCentre(panSz, panH).withY(tail.getY());
     lblPan.setBounds(panR.removeFromTop(kCap));
     ampPan.setBounds(panR.reduced(0, 2));
+}
+
+void SynthPage::applyValueFormatting()
+{
+    // --- Helpers ---
+    // Frequency: "202 Hz" or "5.0 kHz"
+    auto fmtHz = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            if (v >= 1000.0)
+                return juce::String(v / 1000.0, 1) + " kHz";
+            return juce::String(juce::roundToInt(v)) + " Hz";
+        };
+    };
+    // Time in seconds: "0.01 s", "2.10 s"
+    auto fmtSec = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(v, 2) + " s";
+        };
+    };
+    // 0-1 shown as percentage: "0%", "75%"
+    auto fmtPct = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(juce::roundToInt(v * 100.0)) + "%";
+        };
+    };
+    // 1 decimal place
+    auto fmt1 = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(v, 1);
+        };
+    };
+    // 2 decimal places
+    auto fmt2 = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(v, 2);
+        };
+    };
+    // Integer (no decimals)
+    auto fmtInt = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(juce::roundToInt(v));
+        };
+    };
+    // Cents: "25 ct"
+    auto fmtCt = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(juce::roundToInt(v)) + " ct";
+        };
+    };
+    // Pan: "L50", "C", "R50"
+    auto fmtPan = [](juce::Slider& s) {
+        s.textFromValueFunction = [](double v) -> juce::String {
+            const int pct = juce::roundToInt(v * 100.0);
+            if (pct == 0)  return "C";
+            if (pct < 0)   return "L" + juce::String(-pct);
+            return "R" + juce::String(pct);
+        };
+    };
+
+    // --- Filter ---
+    fmtHz(fCut);    fmtHz(fCut2);
+    fmt1(fRes);     fmt1(fRes2);
+    fmt2(fDrive);   fmt2(fDrive2);
+
+    // --- Filter envelope ---
+    fmtSec(filEnvA);  fmtSec(filEnvD);
+    fmtPct(filEnvS);
+    fmtSec(filEnvR);
+
+    // --- Amp envelope ---
+    fmtSec(ampA);  fmtSec(ampD);
+    fmtPct(ampS);
+    fmtSec(ampR);
+
+    // --- Amp volume / pan ---
+    fmtPct(ampVol);
+    fmtPan(ampPan);
+
+    // --- Unison ---
+    fmtInt(uniVoices);
+    fmt1(uniDetune);
+    fmtPct(uniSpread);
+
+    // --- OSC tune ---
+    fmtInt(oscOctave);
+    fmtInt(oscCoarse);
+    fmtCt(oscFine);  // fine tune: -100 to +100 cents
+
+    // --- LFO ---
+    fmt2(lfo1Rate);   fmtPct(lfo1Depth);
+    fmt2(lfo2Rate);   fmtPct(lfo2Depth);
+
+    // --- Granular ---
+    fmtPct(granPos);  fmtPct(granSize);
+    fmtPct(granDensity);  fmtPct(granScatter);
+
+    // --- Wavetable morph ---
+    fmtPct(wavetableMorph);
+
+    // --- Sample start / end ---
+    fmtPct(sampleStart);  fmtPct(sampleEnd);
+
+    // Force all text boxes to redraw with the new functions
+    for (auto* s : { &fCut, &fRes, &fDrive, &fCut2, &fRes2, &fDrive2,
+                     &filEnvA, &filEnvD, &filEnvS, &filEnvR,
+                     &ampA, &ampD, &ampS, &ampR,
+                     &ampVol, &ampPan,
+                     &uniVoices, &uniDetune, &uniSpread,
+                     &oscOctave, &oscCoarse, &oscFine,
+                     &lfo1Rate, &lfo1Depth, &lfo2Rate, &lfo2Depth,
+                     &granPos, &granSize, &granDensity, &granScatter,
+                     &wavetableMorph, &sampleStart, &sampleEnd })
+        s->updateText();
 }
 
 void SynthPage::showKeymapDialog()

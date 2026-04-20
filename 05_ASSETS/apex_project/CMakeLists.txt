@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(WolfsDen VERSION 2.9 LANGUAGES C CXX)
+project(WolfsDen VERSION 3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -43,7 +43,7 @@ juce_add_plugin(
     PLUGIN_CODE WfDn
     VERSION ${PROJECT_VERSION}
     FORMATS ${WOLFS_DEN_PLUGIN_FORMATS}
-    PRODUCT_NAME "Howling Wolves 2.9"
+    PRODUCT_NAME "Howling Wolves 3.0"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
@@ -75,8 +75,8 @@ if(APPLE)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_VST3>"
-                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves 2.9.vst3"
-                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Howling Wolves 2.9.vst3"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves 3.0.vst3"
+                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/VST3/Howling Wolves 3.0.vst3"
                 "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
                 -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
             COMMENT "Wolf's Den: VST3 -> Products/ + ~/Library/Audio/Plug-Ins/VST3/"
@@ -91,8 +91,8 @@ if(APPLE)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AU>"
-                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves 2.9.component"
-                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/Components/Howling Wolves 2.9.component"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves 3.0.component"
+                "-DDST_USER=$ENV{HOME}/Library/Audio/Plug-Ins/Components/Howling Wolves 3.0.component"
                 "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
                 -P "${WOLFS_DEN_DEPLOY_SCRIPT}"
             COMMENT "Wolf's Den: AU -> Products/ + ~/Library/Audio/Plug-Ins/Components/"
@@ -107,7 +107,7 @@ if(APPLE)
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_Standalone>"
-                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves 2.9.app"
+                "-DDST_PRODUCTS=${WOLFS_DEN_PRODUCTS_DIR}/Howling Wolves 3.0.app"
                 "-DDST_USER="
                 "-DFACTORY=${WOLFS_DEN_FACTORY_SAMPLES}"
                 -P "${WOLFS_DEN_DEPLOY_SCRIPT}"

@@ -172,6 +172,11 @@ private:
 
     int lastOscTypeIndex = 0;
 
+    /** Applies professional value-to-text formatting on all sliders.
+     *  Called after every binding change so the text boxes always show
+     *  clean numbers (e.g. "202 Hz", "1.1", "0.01 s") rather than raw floats. */
+    void applyValueFormatting();
+
     // Sub-tab navigation: OSC | FILTER | AMP | LFO
     std::array<juce::TextButton, 4> synthSubTab;
     int activeSynthTab = 0;

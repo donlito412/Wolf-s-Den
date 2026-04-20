@@ -96,6 +96,23 @@ void FxPage::ExpandedPanel::build(juce::AudioProcessorValueTreeState& vts, int g
 
         if (vts.getParameter(paramId) != nullptr)
             atts[(size_t)p] = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(vts, paramId, sliders[(size_t)p]);
+
+        // Apply clean value formatting (overrides APVTS default which shows many decimals).
+        if (isEq)
+        {
+            // EQ params are -18..+18 dB
+            sliders[(size_t)p].textFromValueFunction = [](double v) -> juce::String {
+                return juce::String(v, 1) + " dB";
+            };
+        }
+        else
+        {
+            // Generic 0-1 params — show as percentage
+            sliders[(size_t)p].textFromValueFunction = [](double v) -> juce::String {
+                return juce::String(juce::roundToInt(v * 100.0)) + "%";
+            };
+        }
+        sliders[(size_t)p].updateText();
     }
 }
 
@@ -172,6 +189,15 @@ FxPage::FxPage(WolfsDenAudioProcessor& proc)
     attCho = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "fx_chorus_mix", choMix);
     attComp = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, "fx_compressor", compMix);
 
+    // Clean percentage display on legacy mix knobs
+    for (auto* s : { &revMix, &delMix, &choMix, &compMix })
+    {
+        s->textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(juce::roundToInt(v * 100.0)) + "%";
+        };
+        s->updateText();
+    }
+
     rebuildRack();
     juce::ignoreUnused(processor);
 }
@@ -218,6 +244,12 @@ void FxPage::rebuildRack()
             row->cAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(apvts, typeId, row->type);
         if (apvts.getParameter(mixId) != nullptr)
             row->sAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(apvts, mixId, row->mix);
+
+        // Clean percentage display on the per-slot mix slider
+        row->mix.textFromValueFunction = [](double v) -> juce::String {
+            return juce::String(juce::roundToInt(v * 100.0)) + "%";
+        };
+        row->mix.updateText();
 
         // Expanded panel — built now; type changes will rebuild it
         const int globalIdx = globalSlotIdx(activeRack, s);
