@@ -155,7 +155,11 @@ private:
     juce::Slider   arpOct, arpSwing;
     juce::ComboBox arpPattern;
     juce::Slider   masterVol;
-    juce::Label    lblVol { {}, "OUT VOL" };
+    juce::Label    lblVol    { {}, "OUT VOL" };
+    juce::Label    lblOct    { {}, "OCTAVES" };
+    juce::Label    lblSwing  { {}, "SWING" };
+    juce::Label    lblRate   { {}, "RATE" };
+    juce::Label    lblPat    { {}, "PATTERN" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         attChordOn, attArpOn, attSync, attLatch;

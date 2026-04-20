@@ -12,21 +12,21 @@ template<typename Func>
 std::array<double, kWavetableSize> makeWavetable(Func f)
 {
     std::array<double, kWavetableSize> table{};
-    for (int i = 0; i < kWavetableSize; ++i)
+    for (size_t i = 0; i < (size_t)kWavetableSize; ++i)
     {
-        double phase = static_cast<double>(i) / kWavetableSize;
+        double phase = static_cast<double>(i) / static_cast<double>(kWavetableSize);
         table[i] = f(phase);
     }
     // Normalize to [-1, 1]
     double peak = 0.0;
-    for (int i = 0; i < kWavetableSize; ++i)
+    for (size_t i = 0; i < (size_t)kWavetableSize; ++i)
     {
         if (std::abs(table[i]) > peak)
             peak = std::abs(table[i]);
     }
     if (peak > 0.0)
     {
-        for (int i = 0; i < kWavetableSize; ++i)
+        for (size_t i = 0; i < (size_t)kWavetableSize; ++i)
             table[i] /= peak;
     }
     return table;

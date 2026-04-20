@@ -20,11 +20,13 @@ inline float readAP(std::atomic<float>* p, float d = 0.f) noexcept
 
 inline int readIntNormAP(std::atomic<float>* p, int minV, int maxV, int defV) noexcept
 {
+    // All callers bind AudioParameterInt, which stores the raw integer value as a float
+    // (e.g., value 1 → 1.0f, value 2 → 2.0f).  The old "normalised" branch mistakenly
+    // treated raw values ≤ 1.0 as a 0-1 fraction (e.g., ratchet=1 → 4, trn=0 → -24).
+    // Always convert the raw float directly to int.
     if (!p || maxV < minV)
         return defV;
     const float v = p->load(std::memory_order_relaxed);
-    if (v >= 0.f && v <= 1.0001f && maxV > minV)
-        return juce::jlimit(minV, maxV, minV + (int)std::lround(v * (float)(maxV - minV)));
     return juce::jlimit(minV, maxV, (int)std::lround(v));
 }
 

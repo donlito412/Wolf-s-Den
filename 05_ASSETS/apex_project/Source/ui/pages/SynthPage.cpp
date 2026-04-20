@@ -863,7 +863,7 @@ void SynthPage::resized()
 
 void SynthPage::showKeymapDialog()
 {
-    auto& keymap = processor.getSynthEngine().getLayerKeymap(activeLayer);
+    juce::ignoreUnused(processor.getSynthEngine().getLayerKeymap(activeLayer));
     
     juce::DialogWindow::LaunchOptions options;
     options.dialogTitle = "Sample Keymap - Layer " + juce::String::charToString((juce::juce_wchar)('A' + activeLayer));
@@ -875,7 +875,7 @@ void SynthPage::showKeymapDialog()
     struct SimpleListModel : public juce::ListBoxModel
     {
         int getNumRows() override { return 1; }
-        void paintListBoxItem(int rowNumber, juce::Graphics& g, int width, int height, bool rowIsSelected) override
+        void paintListBoxItem(int /*rowNumber*/, juce::Graphics& g, int width, int height, bool /*rowIsSelected*/) override
         {
             g.setColour(juce::Colours::white);
             g.drawText("No zones loaded", 0, 0, width, height, juce::Justification::centred);

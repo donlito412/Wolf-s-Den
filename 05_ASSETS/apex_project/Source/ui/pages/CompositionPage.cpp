@@ -221,9 +221,19 @@ CompositionPage::CompositionPage(WolfsDenAudioProcessor& proc)
     attVol = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         apvts, "master_volume", masterVol);
 
-    lblVol.setJustificationType(juce::Justification::centred);
-    lblVol.setColour(juce::Label::textColourId, Theme::textSecondary());
-    addAndMakeVisible(lblVol);
+    // ---- Labels for all perform-bar controls ----
+    auto setupLabel = [this](juce::Label& lbl)
+    {
+        lbl.setJustificationType(juce::Justification::centred);
+        lbl.setColour(juce::Label::textColourId, Theme::textSecondary());
+        lbl.setFont(Theme::fontLabel().withHeight(10.f));
+        addAndMakeVisible(lbl);
+    };
+    setupLabel(lblVol);
+    setupLabel(lblOct);
+    setupLabel(lblSwing);
+    setupLabel(lblRate);
+    setupLabel(lblPat);
 
     // -------------------------------------------------------------------------
     // MIDI keyboard listener — maps note-ons to audition pads
@@ -945,18 +955,35 @@ void CompositionPage::resized()
         arpSync .setBounds(togRow.removeFromLeft(52).reduced(1, 2));
         arpLatch.setBounds(togRow.removeFromLeft(52).reduced(1, 2));
 
-        // Arp knobs + pattern
-        const int kw = bot.getWidth() / 4;
+        // Arp knobs + pattern — each column gets a label above the control
+        const int kw        = bot.getWidth() / 4;
+        constexpr int kLblH = 14;
+        constexpr int kComboH = 26;
+
+        // Rate column
         {
-            // ComboBoxes should be compact (same height as preset dropdown), not stretch to fill
-            constexpr int kComboH = 26;
-            auto rateCol = bot.removeFromLeft(kw).reduced(3, 0);
-            arpRate.setBounds(rateCol.removeFromTop(kComboH));
-            auto patCol = bot.removeFromLeft(kw).reduced(3, 0);
-            arpPattern.setBounds(patCol.removeFromTop(kComboH));
+            auto col = bot.removeFromLeft(kw).reduced(3, 0);
+            lblRate .setBounds(col.removeFromTop(kLblH));
+            arpRate .setBounds(col.removeFromTop(kComboH));
         }
-        arpOct    .setBounds(bot.removeFromLeft(kw).reduced(3, 0));
-        arpSwing  .setBounds(bot.reduced(3, 0));
+        // Pattern column
+        {
+            auto col = bot.removeFromLeft(kw).reduced(3, 0);
+            lblPat  .setBounds(col.removeFromTop(kLblH));
+            arpPattern.setBounds(col.removeFromTop(kComboH));
+        }
+        // Octaves column
+        {
+            auto col = bot.removeFromLeft(kw).reduced(3, 0);
+            lblOct  .setBounds(col.removeFromTop(kLblH));
+            arpOct  .setBounds(col);
+        }
+        // Swing column
+        {
+            auto col = bot.reduced(3, 0);
+            lblSwing.setBounds(col.removeFromTop(kLblH));
+            arpSwing.setBounds(col);
+        }
     }
 }
 

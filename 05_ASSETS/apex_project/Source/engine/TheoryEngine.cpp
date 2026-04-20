@@ -1081,29 +1081,28 @@ void TheoryEngine::seedDatabase()
     // All progressions seeded in C (root_key=0); the UI transposes.
     // =========================================================================
     {
-        int prog_count = 0;
-        sqlite3_stmt* pstmt = nullptr;
-        if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM progressions;", -1, &pstmt, nullptr) == SQLITE_OK)
+        // Version stamp: bump this integer any time the seed data changes.
+        // We store it in a tiny meta table and force a full reseed on mismatch.
+        constexpr int kProgSeedVersion = 3;  // <-- increment when chord IDs or data change
+
+        sqlite3_exec(db,
+            "CREATE TABLE IF NOT EXISTS prog_seed_meta (key TEXT PRIMARY KEY, val INTEGER);",
+            nullptr, nullptr, nullptr);
+
+        int stored_version = -1;
         {
-            if (sqlite3_step(pstmt) == SQLITE_ROW)
-                prog_count = sqlite3_column_int(pstmt, 0);
-            sqlite3_finalize(pstmt);
+            sqlite3_stmt* vs = nullptr;
+            if (sqlite3_prepare_v2(db,
+                "SELECT val FROM prog_seed_meta WHERE key='version';",
+                -1, &vs, nullptr) == SQLITE_OK)
+            {
+                if (sqlite3_step(vs) == SQLITE_ROW)
+                    stored_version = sqlite3_column_int(vs, 0);
+                sqlite3_finalize(vs);
+            }
         }
 
-        // Check if existing progressions have root_sequence populated
-        // (handles upgrade from TASK_012 which seeded without root_sequence)
-        int has_roots = 0;
-        sqlite3_stmt* rchk = nullptr;
-        if (sqlite3_prepare_v2(db,
-            "SELECT COUNT(*) FROM progressions WHERE root_sequence IS NOT NULL AND root_sequence != '[0,0,0,0]';",
-            -1, &rchk, nullptr) == SQLITE_OK)
-        {
-            if (sqlite3_step(rchk) == SQLITE_ROW)
-                has_roots = sqlite3_column_int(rchk, 0);
-            sqlite3_finalize(rchk);
-        }
-
-        if (prog_count == 0 || has_roots == 0)
+        if (stored_version < kProgSeedVersion)
         {
             // Delete and re-seed with correct root_sequence data
             sqlite3_exec(db, "DELETE FROM progressions;", nullptr, nullptr, nullptr);

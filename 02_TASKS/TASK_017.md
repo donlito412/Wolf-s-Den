@@ -2,7 +2,7 @@ TASK ID: 017
 
 PHASE: 2
 
-STATUS: PENDING
+STATUS: DONE
 
 GOAL:
 Extend the sample playback engine (WDSamplePlayer / osc case 7) beyond single-WAV-per-layer to support multi-sample mapping, velocity layers, and loop point editing. Currently the engine loads one WAV file into layer 0 for factory presets. A professional sample instrument needs multiple samples across the MIDI range (so notes don't pitch-shift too far from root), velocity layers (different samples for soft vs loud playing), and configurable loop points. This task delivers all three.

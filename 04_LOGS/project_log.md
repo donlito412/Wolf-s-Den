@@ -795,3 +795,41 @@ Details: Bumped project version to 2.7 after confirming TASK_022 (arp static fix
 - Carries all prior fixes: TASK_019 octave cycling, TASK_021 CPU 45%→18%, TASK_020 genre progressions, TASK_013 CPU base optimizations
 
 Status: DONE
+
+---
+[2026-04-19]
+Agent: Cascade
+Tasks: TASK_015, TASK_016, TASK_017
+Output: 03_OUTPUTS/015_wavetable_report.md, 016_granular_report.md, 017_sample_depth_report.md
+
+## Summary
+
+Verified and completed integration for all three Phase 2 DSP depth tasks.
+
+## Changes Made
+
+**TASK_015 — Wavetable:**
+- Fixed wt_index_a / wt_index_b APVTS parameter range from 0-100 to 0-19 (matches 20 factory tables)
+- Added cachedWtIndexA[4] / cachedWtIndexB[4] to SynthEngine private state
+- Added per-block dirty check at top of process(): detects combo changes mid-session and calls setLayerWavetable() immediately — wavetable now switches in real-time without plugin restart
+- Fixed sign-conversion warnings in WavetableBank.h (loop index int to size_t)
+
+**TASK_016 — Granular:**
+- Verified complete: pitch tracking fix, scatter jitter range 0.08 to 0.35, juce::ignoreUnused(hz) removed, spawnGrain() accepts hz — all confirmed in source
+
+**TASK_017 — Sample:**
+- Verified complete: SampleZone, SampleKeymap, SynthEngine::addSampleZone/clearSampleKeymap/getLayerKeymap, noteOn zone selection, loop point UI, preset serialization in getStateInformation/setStateInformation — all confirmed in source
+
+**Warnings eliminated:**
+- WavetableBank.h: sign-conversion on loop index
+- SynthPage.cpp: unused keymap variable replaced with juce::ignoreUnused()
+- SynthPage.cpp: unused rowNumber/rowIsSelected params commented out
+- TopBar.cpp: deprecated juce::Font(float) replaced with juce::Font(juce::FontOptions(float))
+
+## Build Status
+- Zero errors, zero warnings
+- All targets: WolfsDen_All (VST3 + AU + Standalone) built clean
+- WolfsDenTests: all pass
+- VST3 installed: ~/Library/Audio/Plug-Ins/VST3/Howling Wolves 2.7.vst3
+
+Status: DONE

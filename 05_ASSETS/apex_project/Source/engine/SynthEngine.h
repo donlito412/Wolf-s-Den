@@ -113,6 +113,8 @@ private:
     double globalLfoFadeProg = 0;
     bool globalLfoInitialised = false;
     std::array<int, 128> keyDepth {};
+    std::array<int, 4> cachedWtIndexA {};
+    std::array<int, 4> cachedWtIndexB {};
     float lastFxReverbMixAdd = 0.f;
     float lastFxDelayMixAdd = 0.f;
     float lastFxChorusMixAdd = 0.f;

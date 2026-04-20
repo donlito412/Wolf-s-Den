@@ -357,6 +357,19 @@ void SynthEngine::process(juce::AudioBuffer<float>& layerBus,
             if (pos->getBpm().hasValue())
                 hostBpm = juce::jlimit(20.0, 999.0, (double)*pos->getBpm());
 
+    // Per-block WT dirty check: propagate combo changes to voices immediately
+    for (int L = 0; L < kNumLayers; ++L)
+    {
+        const int wtA = ptrs.layerWtIndexA[(size_t)L] ? (int)std::lround(ptrs.layerWtIndexA[(size_t)L]->load()) : 0;
+        const int wtB = ptrs.layerWtIndexB[(size_t)L] ? (int)std::lround(ptrs.layerWtIndexB[(size_t)L]->load()) : 0;
+        if (wtA != cachedWtIndexA[(size_t)L] || wtB != cachedWtIndexB[(size_t)L])
+        {
+            setLayerWavetable(L, wtA, wtB);
+            cachedWtIndexA[(size_t)L] = wtA;
+            cachedWtIndexB[(size_t)L] = wtB;
+        }
+    }
+
     for (int ch = 0; ch < 8; ++ch)
         layerBus.clear(ch, 0, numSamples);
 

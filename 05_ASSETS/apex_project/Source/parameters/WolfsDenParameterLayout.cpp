@@ -223,12 +223,12 @@ void addLayerParams(int layerIndex,
     out.push_back(std::make_unique<juce::AudioParameterInt>(
         pid(pfx + "wt_index_a"),
         "Layer " + juce::String(layerIndex + 1) + " Wavetable A",
-        0, 100, 0));
+        0, 19, 0));
 
     out.push_back(std::make_unique<juce::AudioParameterInt>(
         pid(pfx + "wt_index_b"),
         "Layer " + juce::String(layerIndex + 1) + " Wavetable B",
-        0, 100, 0));
+        0, 19, 0));
 
     out.push_back(std::make_unique<juce::AudioParameterFloat>(
         pid(pfx + "sample_start"),
