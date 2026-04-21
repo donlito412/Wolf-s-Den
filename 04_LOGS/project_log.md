@@ -833,3 +833,24 @@ Verified and completed integration for all three Phase 2 DSP depth tasks.
 - VST3 installed: ~/Library/Audio/Plug-Ins/VST3/Howling Wolves 2.7.vst3
 
 Status: DONE
+
+---
+[2026-04-20]
+Agent: Cascade
+Tasks: TASK_024
+Output: 03_OUTPUTS/024_chord_display_reseed_report.md
+
+## Summary
+
+Fixed persistent chord display regression — audition pads were showing dashes after TASK_023 and the April 19 ALTER TABLE migration due to a version-stamp / failed-seed race condition.
+
+## Changes Made — TheoryEngine.cpp only
+
+1. Bumped kProgSeedVersion from 3 to 4 — forces reseed on any DB with stored_version < 4, including the broken version=3 state left by prior failed seed runs.
+2. Replaced unconditional version stamp INSERT with a defensive COUNT-guarded write — version is only stamped if COUNT(*) FROM progressions > 0 after the seed transaction, preventing a future failed INSERT run from permanently blocking reseeds.
+
+## Build Status
+- Zero errors
+- All targets: WolfsDen_All (VST3 + AU + Standalone) built clean
+
+Status: DONE

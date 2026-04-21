@@ -1083,7 +1083,7 @@ void TheoryEngine::seedDatabase()
     {
         // Version stamp: bump this integer any time the seed data changes.
         // We store it in a tiny meta table and force a full reseed on mismatch.
-        constexpr int kProgSeedVersion = 3;  // <-- increment when chord IDs or data change
+        constexpr int kProgSeedVersion = 4;  // bumped: forces reseed after root_sequence migration
 
         sqlite3_exec(db,
             "CREATE TABLE IF NOT EXISTS prog_seed_meta (key TEXT PRIMARY KEY, val INTEGER);",
@@ -1231,10 +1231,26 @@ void TheoryEngine::seedDatabase()
 
             sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
 
-            // Write the new version so we don't reseed on the next launch.
-            sqlite3_exec(db,
-                "INSERT OR REPLACE INTO prog_seed_meta (key, val) VALUES ('version', 3);",
-                nullptr, nullptr, nullptr);
+            // Only stamp the version if at least one progression was actually inserted.
+            // This prevents a repeat of the TASK_024 bug: failed INSERTs silently leaving
+            // an empty table but version marked as up-to-date.
+            int newCount = 0;
+            {
+                sqlite3_stmt* cs = nullptr;
+                if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM progressions;",
+                                       -1, &cs, nullptr) == SQLITE_OK)
+                {
+                    if (sqlite3_step(cs) == SQLITE_ROW)
+                        newCount = sqlite3_column_int(cs, 0);
+                    sqlite3_finalize(cs);
+                }
+            }
+            if (newCount > 0)
+            {
+                sqlite3_exec(db,
+                    "INSERT OR REPLACE INTO prog_seed_meta (key, val) VALUES ('version', 4);",
+                    nullptr, nullptr, nullptr);
+            }
         }
     }
 
