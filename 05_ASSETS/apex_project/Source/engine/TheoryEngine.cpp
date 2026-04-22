@@ -117,6 +117,25 @@ void TheoryEngine::initialise (const juce::File& dbFile)
 
     createSchema();
     seedDatabase();
+
+    // Failsafe: if progressions table is empty, force a reseed by resetting version
+    {
+        sqlite3_stmt* chk = nullptr;
+        int progCount = 0;
+        if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM progressions;", -1, &chk, nullptr) == SQLITE_OK)
+        {
+            if (sqlite3_step(chk) == SQLITE_ROW)
+                progCount = sqlite3_column_int(chk, 0);
+            sqlite3_finalize(chk);
+        }
+        if (progCount == 0)
+        {
+            // Reset version to trigger reseed
+            sqlite3_exec(db, "DELETE FROM prog_seed_meta WHERE key='version';", nullptr, nullptr, nullptr);
+            seedDatabase(); // Re-run seeding
+        }
+    }
+
     loadChordDefinitions();
     loadScaleDefinitions();
     loadChordSetListings();
@@ -1391,7 +1410,7 @@ std::vector<ProgressionListing> TheoryEngine::getProgressionListings(const std::
     if (!db) return out;
 
     std::string sql = "SELECT id, name, genre, IFNULL(mood,''), energy, root_key, "
-                  "chord_sequence, IFNULL(root_sequence,'[0,0,0,0]') "
+                  "IFNULL(chord_sequence,'[]'), IFNULL(root_sequence,'[0,0,0,0]') "
                   "FROM progressions";
     if (!genre.empty() && genre != "All")
         sql += " WHERE genre = ?";
@@ -1413,8 +1432,10 @@ std::vector<ProgressionListing> TheoryEngine::getProgressionListings(const std::
         p.mood          = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
         p.energy        = sqlite3_column_int(stmt, 4);
         p.rootKey       = sqlite3_column_int(stmt, 5);
-        p.chordSequence = parseIntervalJson(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6)));
-        p.rootSequence  = parseIntervalJson(reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7)));
+        const char* chordSeqText = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6));
+        const char* rootSeqText = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
+        p.chordSequence = parseIntervalJson(chordSeqText ? chordSeqText : "[]");
+        p.rootSequence  = parseIntervalJson(rootSeqText ? rootSeqText : "[0,0,0,0]");
         // Ensure rootSequence has same length as chordSequence (pad with zeros if old data)
         while ((int)p.rootSequence.size() < (int)p.chordSequence.size())
             p.rootSequence.push_back(0);

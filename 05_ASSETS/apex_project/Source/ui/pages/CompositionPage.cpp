@@ -303,7 +303,7 @@ void CompositionPage::buildFilterPills()
     auto& th = processor.getTheoryEngine();
     if (!th.isDatabaseReady()) return;
 
-    // We will query ALL progressions first to gather genres/moods
+    // Query ALL progressions first to gather genres/moods
     cachedProgressions = th.getProgressionListings("");
 
     // Collect unique genres and moods from the DB
@@ -404,11 +404,15 @@ void CompositionPage::rebuildBrowseGrid()
 
     auto& th = processor.getTheoryEngine();
     if (!th.isDatabaseReady()) return;
+    if (filteredIndices.empty()) return;
 
-    
-    const int vw   = juce::jmax(1, gridViewport.getViewWidth());
+    // Use viewport width, but if it's not laid out yet (0 or tiny), use parent's width as fallback
+    int vw = gridViewport.getViewWidth();
+    if (vw < 100)
+        vw = juce::jmax(400, getWidth() - 32); // fallback to reasonable width
+
     const int cols = juce::jmax(1, vw / 200);
-    const int cw   = (vw - 8 * (cols + 1)) / cols;
+    const int cw   = juce::jmax(140, (vw - 8 * (cols + 1)) / cols);
     const int ch   = 60;
     const int gap  = 8;
 
@@ -445,11 +449,7 @@ void CompositionPage::selectProgression(int id)
         }
     }
 
-    DBG("CompositionPage selectProgression: id=" << id << " cache_size=" << (int)cachedProgressions.size());
-    DBG("CompositionPage selectProgression: after cache, seq_size=" << (int)currentChordSequence.size());
-
-    // Fallback: if cache lookup failed or returned empty sequence, query DB directly.
-    // This catches stale-cache scenarios (e.g. DB was reseeded between page loads).
+    // Fallback: if cache lookup failed or returned empty sequence, query DB directly
     if (currentChordSequence.empty())
     {
         auto& th = processor.getTheoryEngine();
@@ -469,8 +469,6 @@ void CompositionPage::selectProgression(int id)
             }
         }
     }
-
-    DBG("CompositionPage selectProgression: final seq_size=" << (int)currentChordSequence.size());
 
     refreshAuditionPads();
 }
@@ -811,13 +809,6 @@ void CompositionPage::timerCallback()
                              ? "* STOP CAPTURE"
                              : "* MIDI CAPTURE");
 
-    // Debug: update progression count label from live DB
-    auto& th = processor.getTheoryEngine();
-    if (th.isDatabaseReady())
-    {
-        auto all = th.getProgressionListings("");
-        dbgLabel.setText("DB: " + juce::String((int)all.size()), juce::dontSendNotification);
-    }
 }
 
 // =============================================================================
@@ -912,6 +903,9 @@ void CompositionPage::resized()
     auto area = getLocalBounds().reduced(8);
     const int W = area.getWidth();
     const int H = area.getHeight();
+
+    // Remember if we need to rebuild the browse grid after layout
+    const bool hadValidSize = (getWidth() > 100 && gridViewport.getViewWidth() > 100);
 
     // ---- Fixed section heights ----
     constexpr int kFilterH  = 48;  // 2 pill rows × 22 + gap 4
@@ -1048,6 +1042,10 @@ void CompositionPage::resized()
 
     // Debug label: top-right corner, small
     dbgLabel.setBounds(getWidth() - 90, 4, 86, 16);
+
+    // If we now have a valid viewport size but didn't before, rebuild the grid
+    if (!hadValidSize && gridViewport.getViewWidth() > 100 && !filteredIndices.empty())
+        rebuildBrowseGrid();
 }
 
 } // namespace wolfsden::ui
