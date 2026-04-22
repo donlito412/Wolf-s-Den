@@ -235,6 +235,12 @@ CompositionPage::CompositionPage(WolfsDenAudioProcessor& proc)
     setupLabel(lblRate);
     setupLabel(lblPat);
 
+    // --- Debug label (temporary, shows DB progression count) ---
+    dbgLabel.setFont(juce::Font(11.f));
+    dbgLabel.setColour(juce::Label::textColourId, juce::Colour(0xffff8800));
+    dbgLabel.setText("DB: ...", juce::dontSendNotification);
+    addAndMakeVisible(dbgLabel);
+
     // -------------------------------------------------------------------------
     // MIDI keyboard listener — maps note-ons to audition pads
     // -------------------------------------------------------------------------
@@ -334,6 +340,7 @@ void CompositionPage::buildFilterPills()
 
 void CompositionPage::applyGenreFilter(const juce::String& genre)
 {
+    DBG("CompositionPage::applyGenreFilter - Selecting genre: " << genre);
     activeGenre = genre;
     for (auto* p : genrePills)
         stylePill(*p, p->getButtonText() == genre);
@@ -342,7 +349,8 @@ void CompositionPage::applyGenreFilter(const juce::String& genre)
     auto& th = processor.getTheoryEngine();
     if (th.isDatabaseReady()) {
         cachedProgressions = th.getProgressionListings(activeGenre.toStdString());
-            }
+        DBG("CompositionPage::applyGenreFilter - DB returned " << cachedProgressions.size() << " progressions for genre " << genre);
+    }
 
     rebuildFilteredIndices();
     rebuildBrowseGrid();
@@ -437,6 +445,9 @@ void CompositionPage::selectProgression(int id)
         }
     }
 
+    DBG("CompositionPage selectProgression: id=" << id << " cache_size=" << (int)cachedProgressions.size());
+    DBG("CompositionPage selectProgression: after cache, seq_size=" << (int)currentChordSequence.size());
+
     // Fallback: if cache lookup failed or returned empty sequence, query DB directly.
     // This catches stale-cache scenarios (e.g. DB was reseeded between page loads).
     if (currentChordSequence.empty())
@@ -458,6 +469,8 @@ void CompositionPage::selectProgression(int id)
             }
         }
     }
+
+    DBG("CompositionPage selectProgression: final seq_size=" << (int)currentChordSequence.size());
 
     refreshAuditionPads();
 }
@@ -797,6 +810,14 @@ void CompositionPage::timerCallback()
     captureBtn.setButtonText(processor.isMidiCaptureActive()
                              ? "* STOP CAPTURE"
                              : "* MIDI CAPTURE");
+
+    // Debug: update progression count label from live DB
+    auto& th = processor.getTheoryEngine();
+    if (th.isDatabaseReady())
+    {
+        auto all = th.getProgressionListings("");
+        dbgLabel.setText("DB: " + juce::String((int)all.size()), juce::dontSendNotification);
+    }
 }
 
 // =============================================================================
@@ -1024,6 +1045,9 @@ void CompositionPage::resized()
             arpSwing.setBounds(col);
         }
     }
+
+    // Debug label: top-right corner, small
+    dbgLabel.setBounds(getWidth() - 90, 4, 86, 16);
 }
 
 } // namespace wolfsden::ui

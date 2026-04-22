@@ -160,6 +160,7 @@ private:
     juce::Label    lblSwing  { {}, "SWING" };
     juce::Label    lblRate   { {}, "RATE" };
     juce::Label    lblPat    { {}, "PATTERN" };
+    juce::Label    dbgLabel;
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         attChordOn, attArpOn, attSync, attLatch;

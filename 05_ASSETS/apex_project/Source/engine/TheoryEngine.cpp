@@ -797,10 +797,11 @@ void TheoryEngine::createSchema()
         "ALTER TABLE presets ADD COLUMN env_decay    REAL DEFAULT 0.3;",
         "ALTER TABLE presets ADD COLUMN env_sustain  REAL DEFAULT 0.8;",
         "ALTER TABLE presets ADD COLUMN env_release  REAL DEFAULT 0.4;",
-        // Progressions migration: add root_sequence column introduced in TASK_020.
-        // SQLite returns an error if the column already exists — that error is intentionally ignored
-        // by the loop below, making this a safe no-op for fresh DBs.
-        "ALTER TABLE progressions ADD COLUMN root_sequence TEXT DEFAULT '[0,0,0,0]';",
+        // Progressions migrations — safe no-ops if columns already exist.
+        // chord_sequence: core column; missing on any DB created before this column was defined.
+        // root_sequence:  added in TASK_020.
+        "ALTER TABLE progressions ADD COLUMN chord_sequence TEXT DEFAULT '[]';",
+        "ALTER TABLE progressions ADD COLUMN root_sequence  TEXT DEFAULT '[0,0,0,0]';",
         nullptr
     };
     for (int i = 0; migrations[i] != nullptr; ++i)

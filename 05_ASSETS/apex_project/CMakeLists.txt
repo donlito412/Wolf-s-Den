@@ -67,11 +67,24 @@ set(WOLFS_DEN_DEPLOY_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployWolfsDenPlu
 set(WOLFS_DEN_FACTORY_SAMPLES "${CMAKE_CURRENT_SOURCE_DIR}/DistributionContent")
 
 if(APPLE)
+    set(WOLFS_DEN_CLEAN_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CleanOldPlugins.cmake")
     if(TARGET WolfsDen_VST3)
         add_custom_command(
             TARGET WolfsDen_VST3
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WOLFS_DEN_PRODUCTS_DIR}"
+            # Remove any old versioned VST3 bundles (e.g. "Howling Wolves 3.2.vst3") that
+            # share the same plugin code and would cause CoreAudio to load the wrong binary.
+            COMMAND ${CMAKE_COMMAND}
+                "-DSEARCH_DIR=$ENV{HOME}/Library/Audio/Plug-Ins/VST3"
+                "-DPLUGIN_NAME=Howling Wolves"
+                "-DEXT=vst3"
+                -P "${WOLFS_DEN_CLEAN_SCRIPT}"
+            COMMAND ${CMAKE_COMMAND}
+                "-DSEARCH_DIR=${WOLFS_DEN_PRODUCTS_DIR}"
+                "-DPLUGIN_NAME=Howling Wolves"
+                "-DEXT=vst3"
+                -P "${WOLFS_DEN_CLEAN_SCRIPT}"
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_VST3>"
@@ -88,6 +101,18 @@ if(APPLE)
             TARGET WolfsDen_AU
             POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E make_directory "${WOLFS_DEN_PRODUCTS_DIR}"
+            # Remove any old versioned AU bundles (e.g. "Howling Wolves 3.2.component") that
+            # share the same plugin code and would cause Logic Pro to load the wrong binary.
+            COMMAND ${CMAKE_COMMAND}
+                "-DSEARCH_DIR=$ENV{HOME}/Library/Audio/Plug-Ins/Components"
+                "-DPLUGIN_NAME=Howling Wolves"
+                "-DEXT=component"
+                -P "${WOLFS_DEN_CLEAN_SCRIPT}"
+            COMMAND ${CMAKE_COMMAND}
+                "-DSEARCH_DIR=${WOLFS_DEN_PRODUCTS_DIR}"
+                "-DPLUGIN_NAME=Howling Wolves"
+                "-DEXT=component"
+                -P "${WOLFS_DEN_CLEAN_SCRIPT}"
             COMMAND
                 ${CMAKE_COMMAND}
                 "-DSRC=$<TARGET_BUNDLE_DIR:WolfsDen_AU>"
