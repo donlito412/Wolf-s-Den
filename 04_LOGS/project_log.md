@@ -1,3 +1,27 @@
+[2026-04-22]
+
+Agent: Claude
+Task: TASK_026 — Direct fix for chord pads showing dashes (removed version-stamp mechanism)
+Output: TheoryEngine.cpp (direct edit)
+Details:
+  Root cause: The kProgSeedVersion / stored_version / prog_seed_meta version-stamp guard
+  was the fragile mechanism causing silent failures. On any launch where the meta table
+  read failed, returned an unexpected value, or the DB was in an edge state, the version
+  check would evaluate false (stored_version >= kProgSeedVersion) and skip the reseed
+  entirely — leaving the progressions table empty. Empty table → selectProgression() finds
+  no matching rows → currentChordSequence stays empty → refreshAuditionPads() shows dashes.
+
+  Fix: Removed the entire kProgSeedVersion / stored_version / prog_seed_meta block.
+  Replaced with an unconditional always-reseed:
+    DELETE FROM progressions → BEGIN TRANSACTION → 88 INSERTs → COMMIT
+  This runs on every plugin launch. Progressions are factory-only data (no user edits),
+  so reseeding every launch is safe and eliminates all failure modes.
+  Changed INSERT OR IGNORE → INSERT (safe since we DELETE first).
+
+Status: DONE
+
+---
+
 [2026-04-19]
 
 Agent: Claude
