@@ -774,6 +774,11 @@ void TheoryEngine::createSchema()
             created_at      TEXT DEFAULT CURRENT_TIMESTAMP
         );
 
+        CREATE TABLE IF NOT EXISTS prog_seed_meta (
+            key TEXT PRIMARY KEY,
+            val INTEGER
+        );
+
         CREATE INDEX IF NOT EXISTS idx_chord_set_entries_set ON chord_set_entries(chord_set_id);
         CREATE INDEX IF NOT EXISTS idx_chord_sets_genre      ON chord_sets(genre);
         CREATE INDEX IF NOT EXISTS idx_chord_sets_mood       ON chord_sets(mood);
@@ -1082,22 +1087,44 @@ void TheoryEngine::seedDatabase()
     // All progressions seeded in C (root_key=0); the UI transposes.
     // =========================================================================
     {
-        // Always reseed progressions on startup — factory data only, no user customization.
-        // This eliminates the fragile version-stamp mechanism that could silently leave
-        // the table empty and cause pads to show dashes instead of chord names.
-        sqlite3_exec(db, "DELETE FROM progressions;", nullptr, nullptr, nullptr);
-        sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+        // Version stamp: bump this integer any time the seed data changes.
+        // We store it in a tiny meta table and force a full reseed on mismatch.
+        constexpr int kProgSeedVersion = 5;  // bumped: replaces seed data with researched progressions
 
-        // Helper lambda: insert one progression row
-        auto ins = [&](const char* name, const char* genre, const char* mood, int energy,
-                       const char* seq, const char* roots)
+        sqlite3_exec(db,
+            "CREATE TABLE IF NOT EXISTS prog_seed_meta (key TEXT PRIMARY KEY, val INTEGER);",
+            nullptr, nullptr, nullptr);
+
+        int stored_version = -1;
         {
-            std::string sql =
-                std::string("INSERT INTO progressions (name,genre,mood,energy,root_key,chord_sequence,root_sequence) VALUES ('")
-                + name + "','" + genre + "','" + mood + "',"
-                + std::to_string(energy) + ",0,'" + seq + "','" + roots + "');";
-            sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
-        };
+            sqlite3_stmt* vs = nullptr;
+            if (sqlite3_prepare_v2(db,
+                "SELECT val FROM prog_seed_meta WHERE key='version';",
+                -1, &vs, nullptr) == SQLITE_OK)
+            {
+                if (sqlite3_step(vs) == SQLITE_ROW)
+                    stored_version = sqlite3_column_int(vs, 0);
+                sqlite3_finalize(vs);
+            }
+        }
+
+        if (stored_version < kProgSeedVersion)
+        {
+            DBG("WolfsDen seedDatabase: stored_version=" << stored_version << " < " << kProgSeedVersion << ", reseeding...");
+            // Delete and re-seed with correct root_sequence data
+            sqlite3_exec(db, "DELETE FROM progressions;", nullptr, nullptr, nullptr);
+            sqlite3_exec(db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+
+            // Helper lambda: insert one progression row
+            auto ins = [&](const char* name, const char* genre, const char* mood, int energy,
+                           const char* seq, const char* roots)
+            {
+                std::string sql =
+                    std::string("INSERT OR IGNORE INTO progressions (name,genre,mood,energy,root_key,chord_sequence,root_sequence) VALUES ('")
+                    + name + "','" + genre + "','" + mood + "',"
+                    + std::to_string(energy) + ",0,'" + seq + "','" + roots + "');";
+                sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
+            };
 
             // ---- Hip-Hop (8) ----
             ins("Classic Boom Bap",    "Hip-Hop","Dark",       2,"[12,12,10,11]","[9,2,7,0]");  // Am7-Dm7-G7-Cmaj7
@@ -1210,6 +1237,33 @@ void TheoryEngine::seedDatabase()
             ins("Chicago Blues",       "Blues","Gritty",       3,"[10,10,10,10]","[7,0,2,7]"); // G7-C7-D7-G7
 
             sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+
+            // Only stamp the version if at least one progression was actually inserted.
+            // This prevents a repeat of the TASK_024 bug: failed INSERTs silently leaving
+            // an empty table but version marked as up-to-date.
+            int newCount = 0;
+            {
+                sqlite3_stmt* cs = nullptr;
+                if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM progressions;",
+                                       -1, &cs, nullptr) == SQLITE_OK)
+                {
+                    if (sqlite3_step(cs) == SQLITE_ROW)
+                        newCount = sqlite3_column_int(cs, 0);
+                    sqlite3_finalize(cs);
+                }
+            }
+            if (newCount > 0)
+            {
+                sqlite3_exec(db,
+                    "INSERT OR REPLACE INTO prog_seed_meta (key, val) VALUES ('version', 5);",
+                    nullptr, nullptr, nullptr);
+                DBG("WolfsDen seedDatabase: reseeded OK, count=" << newCount << ", version=5");
+            }
+            else
+            {
+                DBG("WolfsDen seedDatabase: WARNING — 0 progressions inserted, version NOT written!");
+            }
+        }
     }
 
 
