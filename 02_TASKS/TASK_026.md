@@ -2,7 +2,7 @@ TASK ID: 026
 
 PHASE: 2
 
-STATUS: DONE (approach changed — diagnostic label replaced with direct unconditional fix to TheoryEngine.cpp; version-stamp mechanism removed entirely)
+STATUS: DONE
 
 GOAL:
 Find out why chords still show dashes after TASK_025. Add a small visible debug label to
