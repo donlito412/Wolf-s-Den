@@ -1083,7 +1083,7 @@ void TheoryEngine::seedDatabase()
     {
         // Version stamp: bump this integer any time the seed data changes.
         // We store it in a tiny meta table and force a full reseed on mismatch.
-        constexpr int kProgSeedVersion = 4;  // bumped: forces reseed after root_sequence migration
+        constexpr int kProgSeedVersion = 5;  // bumped: replaces seed data with researched progressions
 
         sqlite3_exec(db,
             "CREATE TABLE IF NOT EXISTS prog_seed_meta (key TEXT PRIMARY KEY, val INTEGER);",
@@ -1119,115 +1119,115 @@ void TheoryEngine::seedDatabase()
                 sqlite3_exec(db, sql.c_str(), nullptr, nullptr, nullptr);
             };
 
-            // ---- Hip-Hop ----
-            ins("Trap God",       "Hip-Hop","Dark",       3,"[2,12,3,2]",    "[0,1,0,0]");   // i-bII-dim-i
-            ins("Soul Sample",    "Hip-Hop","Melancholic", 2,"[12,22,14,10]", "[0,0,5,7]");   // im7-IVm9-iim7b5-V7
-            ins("Dilla Bounce",   "Hip-Hop","Warm",       2,"[11,12,10,22]", "[0,5,7,9]");   // Imaj7-IVm7-V7-VIm9
-            ins("Night Drive",    "Hip-Hop","Dark",       2,"[2,2,10,2]",    "[0,0,7,0]");   // i-i-V7-i
-            ins("Golden Era",     "Hip-Hop","Nostalgic",  2,"[1,12,10,1]",   "[0,9,7,0]");   // I-vim7-V7-I
-            ins("Melancholy",     "Hip-Hop","Sad",        1,"[12,14,10,2]",  "[0,5,7,0]");   // im7-ivm7b5-V7-i
-            ins("West Coast",     "Hip-Hop","Smooth",     2,"[2,12,2,12]",   "[0,5,0,5]");   // i-ivm7-i-ivm7
-            ins("Brooklyn",       "Hip-Hop","Tense",      3,"[2,3,12,10]",   "[0,3,5,7]");   // i-bIIIdim-ivm7-V7
+            // ---- Hip-Hop (8) ----
+            ins("Classic Boom Bap",    "Hip-Hop","Dark",       2,"[12,12,10,11]","[9,2,7,0]");  // Am7-Dm7-G7-Cmaj7
+            ins("Trap Mode",           "Hip-Hop","Dark",       3,"[2,1,1,1]",    "[0,8,10,7]"); // Cm-Ab-Bb-G
+            ins("Soul Sample",         "Hip-Hop","Melancholic",2,"[12,12,11,10]","[9,2,5,7]");  // Am7-Dm7-Fmaj7-G7
+            ins("Dilla Bounce",        "Hip-Hop","Warm",       2,"[11,12,10,22]","[0,5,7,9]");  // Cmaj7-Fm7-G7-Am9
+            ins("Golden Era",          "Hip-Hop","Nostalgic",  2,"[11,12,11,10]","[0,9,5,7]");  // Cmaj7-Am7-Fmaj7-G7
+            ins("Night Drive",         "Hip-Hop","Dark",       2,"[12,12,10,12]","[9,2,7,9]");  // Am7-Dm7-G7-Am7
+            ins("West Coast",          "Hip-Hop","Smooth",     2,"[12,11,12,10]","[2,5,9,7]");  // Dm7-Fmaj7-Am7-G7
+            ins("Brooklyn",            "Hip-Hop","Tense",      3,"[12,10,11,12]","[2,7,0,9]");  // Dm7-G7-Cmaj7-Am7
 
-            // ---- R&B / Neo-Soul ----
-            ins("Slow Burn",      "R&B","Sensual",   1,"[21,22,22,29]", "[0,9,2,7]");  // Imaj9-VIm9-iim9-V7b9
-            ins("Butterfly",      "R&B","Romantic",  2,"[11,12,10,11]", "[0,9,2,7]");  // Imaj7-VIm7-iim7-V7
-            ins("Neo Groove",     "R&B","Uplifting", 2,"[21,20,22,10]", "[0,7,2,7]");  // Imaj9-V9-iim9-V7
-            ins("After Midnight", "R&B","Dark",      1,"[22,14,10,22]", "[0,2,7,0]");  // Im9-iim7b5-V7-Im9
-            ins("Summer Love",    "R&B","Warm",      2,"[41,22,10,42]", "[0,2,7,0]");  // I6/9-iim9-V7-Im6/9
-            ins("Old School",     "R&B","Nostalgic", 2,"[8,9,10,11]",   "[0,9,7,0]");  // Imaj6-VIm6-V7-Imaj7
-            ins("Smooth Groove",  "R&B","Smooth",    1,"[11,22,10,11]", "[0,2,7,0]");  // Imaj7-iim9-V7-Imaj7
-            ins("Pain",           "R&B","Sad",       1,"[12,14,10,2]",  "[0,5,7,0]");  // im7-ivm7b5-V7-i
+            // ---- Trap (8) ----
+            ins("Dark Trap",           "Trap","Dark",          3,"[2,1,1,1]",    "[9,5,7,4]");  // Am-F-G-Em
+            ins("Street Menace",       "Trap","Dark",          3,"[2,1,1,1]",    "[0,8,10,7]"); // Cm-Ab-Bb-G
+            ins("Night Rider",         "Trap","Dark",          2,"[2,1,1,1]",    "[4,0,2,11]"); // Em-C-D-B
+            ins("808 Slide",           "Trap","Dark",          3,"[2,1,1,1]",    "[11,7,9,6]"); // Bm-G-A-F#
+            ins("Cold World",          "Trap","Dark",          2,"[2,1,1,1]",    "[2,10,0,9]"); // Dm-Bb-C-A
+            ins("Trap Goth",           "Trap","Dark",          3,"[2,1,1,1]",    "[5,1,3,0]");  // Fm-Db-Eb-C
+            ins("Melodic Drill",       "Trap","Dark",          2,"[2,1,1,1]",    "[7,3,5,2]");  // Gm-Eb-F-D
+            ins("Plug Walk",           "Trap","Dark",          3,"[2,1,1,2]",    "[9,5,0,7]");  // Am-F-C-G
 
-            // ---- Pop ----
-            ins("Radio Hit",      "Pop","Uplifting", 3,"[1,5,2,1]",     "[0,5,9,0]");  // I-IV-vi-I
-            ins("Anthem",         "Pop","Anthemic",  3,"[1,5,1,5]",     "[0,5,0,5]");  // I-IV-I-IV
-            ins("Dancefloor",     "Pop","Energetic", 3,"[1,2,5,1]",     "[0,9,5,0]");  // I-vi-IV-I
-            ins("Comeback",       "Pop","Emotional", 2,"[1,4,5,2]",     "[0,7,5,9]");  // I-V-IV-vi
-            ins("Sad Pop",        "Pop","Sad",       2,"[2,5,1,4]",     "[9,5,0,7]");  // vi-IV-I-V
-            ins("Dreamy",         "Pop","Dreamy",    1,"[11,22,10,11]", "[0,2,7,0]");  // Imaj7-iim9-V7-Imaj7
-            ins("Chill Vibes",    "Pop","Chill",     1,"[1,5,2,5]",     "[0,5,9,7]");  // I-IV-vi-V
-            ins("Happy Day",      "Pop","Happy",     3,"[1,4,5,4]",     "[0,7,5,7]");  // I-V-IV-V
+            // ---- R&B (8) ----
+            ins("Neo Soul Classic",    "R&B","Smooth",         2,"[21,22,21,26]","[0,9,5,7]");  // Cmaj9-Am9-Fmaj9-G13
+            ins("Silk Road",           "R&B","Smooth",         2,"[11,12,12,20]","[5,4,2,7]");  // Fmaj7-Em7-Dm7-G9
+            ins("Late Night RnB",      "R&B","Dark",           1,"[11,12,11,20]","[8,5,1,3]");  // Abmaj7-Fm7-Dbmaj7-Eb9
+            ins("Velvet Groove",       "R&B","Smooth",         2,"[11,12,11,20]","[7,4,0,2]");  // Gmaj7-Em7-Cmaj7-D9
+            ins("Soul Glow",           "R&B","Uplifting",      2,"[11,12,11,20]","[3,0,8,10]"); // Ebmaj7-Cm7-Abmaj7-Bb9
+            ins("Midnight Drive",      "R&B","Smooth",         1,"[11,12,11,20]","[10,7,3,5]"); // Bbmaj7-Gm7-Ebmaj7-F9
+            ins("Desire",             "R&B","Smooth",          2,"[22,21,21,22]","[2,7,0,9]");  // Dm9-Gmaj9-Cmaj9-Am9
+            ins("Golden Hour",         "R&B","Uplifting",      2,"[22,22,21,21]","[9,2,7,0]");  // Am9-Dm9-Gmaj9-Cmaj9
 
-            // ---- Jazz ----
-            ins("ii-V-I",         "Jazz","Smooth",     2,"[12,10,11,12]", "[2,7,0,2]"); // Dm7-G7-Cmaj7-Dm7
-            ins("Tritone Sub",    "Jazz","Tense",      2,"[12,29,11,12]", "[2,6,0,2]"); // Dm7-Db7b9-Cmaj7-Dm7
-            ins("Autumn Leaves",  "Jazz","Melancholic",2,"[12,10,11,22]", "[2,7,0,9]"); // Dm7-G7-Cmaj7-Am9
-            ins("Giant Steps",    "Jazz","Complex",    3,"[11,10,11,10]", "[0,7,4,11]");// Cmaj7-G7-Emaj7-B7
-            ins("Coltrane Turnaround","Jazz","Tense",  3,"[11,10,11,10]", "[0,4,8,11]");// Cmaj7-E7-Abmaj7-B7
-            ins("Blue Bossa",     "Jazz","Latin",      2,"[12,10,11,22]", "[2,7,0,9]"); // Dm7-G7-Cmaj7-Am9
-            ins("So What",        "Jazz","Cool",       1,"[12,12,12,12]", "[2,2,2,2]"); // Dm7 modal vamp
-            ins("Rhythm Changes", "Jazz","Bebop",      3,"[1,2,10,1]",    "[0,9,7,0]"); // I-vi-V7-I
+            // ---- Pop (8) ----
+            ins("Radio One",           "Pop","Happy",          2,"[1,1,2,1]",    "[0,7,9,5]");  // C-G-Am-F
+            ins("Minor Pop",           "Pop","Happy",          2,"[2,1,1,1]",    "[9,5,0,7]");  // Am-F-C-G
+            ins("Classic Pop",         "Pop","Happy",          2,"[1,2,1,1]",    "[0,9,5,7]");  // C-Am-F-G
+            ins("Four Chord Pop",      "Pop","Happy",          2,"[1,1,1,1]",    "[0,5,7,5]");  // C-F-G-F
+            ins("Stadium Anthem",      "Pop","Uplifting",      3,"[1,1,2,1]",    "[0,5,9,7]");  // C-F-Am-G
+            ins("G-Pop Bounce",        "Pop","Happy",          2,"[1,1,2,1]",    "[7,2,4,0]");  // G-D-Em-C
+            ins("Indie Folk",          "Pop","Chill",          2,"[2,2,1,1]",    "[9,4,7,2]");  // Am-Em-G-D
+            ins("Summer Pop",          "Pop","Happy",          3,"[1,1,2,1]",    "[2,9,11,7]"); // D-A-Bm-G
 
-            // ---- Lo-Fi ----
-            ins("Rainy Day",      "Lo-Fi","Melancholic",1,"[12,22,29,12]", "[0,2,7,0]");
-            ins("Bedroom Tape",   "Lo-Fi","Nostalgic",  1,"[11,22,10,11]", "[0,2,7,0]");
-            ins("Sunday Morning", "Lo-Fi","Calm",       1,"[21,22,11,10]", "[0,2,5,7]");
-            ins("Dusty Crate",    "Lo-Fi","Warm",       1,"[11,9,10,12]",  "[0,9,7,2]");
-            ins("Late Night",     "Lo-Fi","Dark",       1,"[12,14,10,2]",  "[0,5,7,0]");
-            ins("Coffee Shop",    "Lo-Fi","Calm",       1,"[21,11,10,22]", "[0,5,7,2]");
-            ins("Vintage Loop",   "Lo-Fi","Nostalgic",  1,"[41,22,10,42]", "[0,2,7,0]");
-            ins("Crinkle",        "Lo-Fi","Dreamy",     1,"[11,12,12,10]", "[0,5,2,7]");
+            // ---- Jazz (8) ----
+            ins("ii-V-I Jazz",         "Jazz","Smooth",        2,"[12,10,11,11]","[2,7,0,0]");  // Dm7-G7-Cmaj7-Cmaj7
+            ins("Rhythm Changes",      "Jazz","Uplifting",     2,"[11,12,12,10]","[0,9,2,7]");  // Cmaj7-Am7-Dm7-G7
+            ins("Minor ii-V-i",        "Jazz","Dark",          2,"[14,29,12,12]","[2,7,0,0]");  // Dm7b5-G7b9-Cm7-Cm7
+            ins("Jazz Ballad",         "Jazz","Smooth",        1,"[21,22,22,26]","[0,9,2,7]");  // Cmaj9-Am9-Dm9-G13
+            ins("Coltrane Cycle",      "Jazz","Intense",       2,"[11,11,11,11]","[0,3,8,11]"); // Cmaj7-Ebmaj7-Abmaj7-Bmaj7
+            ins("Bebop Groove",        "Jazz","Smooth",        2,"[22,26,21,22]","[2,7,0,9]");  // Dm9-G13-Cmaj9-Am9
+            ins("Gypsy Jazz",          "Jazz","Dark",          2,"[2,10,2,10]",  "[9,4,9,4]");  // Am-E7-Am-E7
+            ins("Modal Vamp",          "Jazz","Chill",         1,"[12,12,26,26]","[2,2,7,7]");  // Dm7-Dm7-G13-G13
 
-            // ---- Afrobeats ----
-            ins("Afro High Life", "Afrobeats","Uplifting", 3,"[1,4,5,1]", "[0,5,7,0]");
-            ins("Lagos Nights",   "Afrobeats","Energetic", 3,"[1,2,5,4]", "[0,9,7,5]");
-            ins("Makossa",        "Afrobeats","Happy",     3,"[1,5,4,1]", "[0,7,5,0]");
-            ins("Afropop",        "Afrobeats","Euphoric",  3,"[1,1,4,5]", "[0,0,5,7]");
-            ins("Highlife Gold",  "Afrobeats","Warm",      2,"[1,4,1,5]", "[0,5,0,7]");
-            ins("Juju",           "Afrobeats","Spiritual", 2,"[1,2,4,1]", "[0,9,5,0]");
-            ins("Fuji Funk",      "Afrobeats","Energetic", 3,"[4,1,5,4]", "[5,0,7,5]");
-            ins("Naija",          "Afrobeats","Uplifting", 3,"[1,5,4,2]", "[0,7,5,9]");
+            // ---- Lo-Fi (8) ----
+            ins("Rainy Afternoon",     "Lo-Fi","Nostalgic",    1,"[11,12,11,10]","[0,9,5,7]");  // Cmaj7-Am7-Fmaj7-G7
+            ins("Dusty Records",       "Lo-Fi","Nostalgic",    1,"[11,12,12,12]","[5,2,9,4]");  // Fmaj7-Dm7-Am7-Em7
+            ins("Hazy Summer",         "Lo-Fi","Dreamy",       1,"[11,12,11,10]","[8,5,1,10]"); // Abmaj7-Fm7-Dbmaj7-Bb7
+            ins("Slow Motion",         "Lo-Fi","Chill",        1,"[11,12,11,10]","[7,4,0,2]");  // Gmaj7-Em7-Cmaj7-D7
+            ins("Tape Hiss",           "Lo-Fi","Dreamy",       1,"[11,12,11,12]","[10,7,3,0]"); // Bbmaj7-Gm7-Ebmaj7-Cm7
+            ins("Warm Vinyl",          "Lo-Fi","Nostalgic",    1,"[12,12,11,10]","[2,9,10,0]"); // Dm7-Am7-Bbmaj7-C7
+            ins("Saturday Morning",    "Lo-Fi","Chill",        1,"[12,11,11,10]","[9,5,0,7]");  // Am7-Fmaj7-Cmaj7-G7
+            ins("Late Study",          "Lo-Fi","Dreamy",       1,"[11,12,11,10]","[4,1,9,11]"); // Emaj7-C#m7-Amaj7-B7
 
-            // ---- Trap ----
-            ins("Dark Flex",      "Trap","Dark",       3,"[2,1,2,3]",    "[0,1,0,3]");
-            ins("Ominous",        "Trap","Tense",      3,"[2,3,2,10]",   "[0,3,0,7]");
-            ins("Paranoid",       "Trap","Aggressive", 3,"[2,14,3,2]",   "[0,2,5,0]");
-            ins("808 Roll",       "Trap","Dark",       3,"[2,12,14,2]",  "[0,5,2,0]");
-            ins("Minor Threat",   "Trap","Tense",      3,"[2,2,3,10]",   "[0,0,3,7]");
-            ins("Street Hymn",    "Trap","Melancholic",2,"[12,14,10,2]", "[0,5,7,0]");
-            ins("Icey",           "Trap","Cold",       2,"[2,12,3,12]",  "[0,5,3,2]");
-            ins("South Side",     "Trap","Dark",       3,"[2,10,3,2]",   "[0,7,3,0]");
+            // ---- Afrobeats (8) ----
+            ins("Lagos Nights",        "Afrobeats","Groovy",   3,"[2,1,1,2]",   "[9,7,5,4]");  // Am-G-F-Em
+            ins("Highlife Groove",     "Afrobeats","Groovy",   2,"[11,12,11,10]","[5,2,10,0]"); // Fmaj7-Dm7-Bbmaj7-C7
+            ins("Amapiano Flow",       "Afrobeats","Groovy",   3,"[11,12,12,10]","[1,10,3,8]"); // Dbmaj7-Bbm7-Ebm7-Ab7
+            ins("Afropop Summer",      "Afrobeats","Happy",    3,"[1,2,1,1]",   "[7,4,0,2]");  // G-Em-C-D
+            ins("Naija Groove",        "Afrobeats","Groovy",   2,"[11,12,11,10]","[3,0,8,10]"); // Ebmaj7-Cm7-Abmaj7-Bb7
+            ins("Afroswing",           "Afrobeats","Smooth",   2,"[12,12,11,12]","[4,9,2,11]"); // Em7-Am7-Dmaj7-Bm7
+            ins("West African Pull",   "Afrobeats","Groovy",   3,"[2,1,1,2]",   "[2,0,10,9]"); // Dm-C-Bb-Am
+            ins("Zanku Energy",        "Afrobeats","Groovy",   3,"[2,1,1,1]",   "[0,10,8,7]"); // Cm-Bb-Ab-G
 
-            // ---- EDM / Dance ----
-            ins("Euphoria",       "EDM","Euphoric",  3,"[1,2,4,5]", "[0,9,5,7]");
-            ins("Festival",       "EDM","Energetic", 3,"[1,5,4,5]", "[0,7,5,7]");
-            ins("Drop",           "EDM","Aggressive",3,"[1,2,5,1]", "[0,9,5,0]");
-            ins("Build Up",       "EDM","Tense",     3,"[2,4,5,1]", "[9,5,7,0]");
-            ins("Sunrise",        "EDM","Uplifting", 3,"[1,4,5,2]", "[0,7,5,9]");
-            ins("Trance Gate",    "EDM","Euphoric",  3,"[2,4,5,2]", "[9,5,7,9]");
-            ins("Deep House",     "EDM","Smooth",    2,"[12,11,22,10]","[0,7,2,7]");
-            ins("Progressive",    "EDM","Energetic", 3,"[2,5,4,1]", "[9,7,5,0]");
+            // ---- EDM (8) ----
+            ins("Euphoric Drop",       "EDM","Uplifting",      3,"[2,1,1,1]",   "[9,5,0,7]");  // Am-F-C-G
+            ins("Trance Build",        "EDM","Uplifting",      3,"[2,2,1,1]",   "[9,4,5,7]");  // Am-Em-F-G
+            ins("House Classic",       "EDM","Groovy",         3,"[2,1,1,2]",   "[2,10,0,9]"); // Dm-Bb-C-Am
+            ins("Deep House",          "EDM","Dark",           2,"[2,2,1,1]",   "[5,0,8,3]");  // Fm-Cm-Ab-Eb
+            ins("Progressive Lift",    "EDM","Uplifting",      3,"[2,1,1,2]",   "[9,5,7,4]");  // Am-F-G-Em
+            ins("Melodic Drop",        "EDM","Dark",           3,"[2,1,1,1]",   "[0,8,3,10]"); // Cm-Ab-Eb-Bb
+            ins("Festival Anthem",     "EDM","Uplifting",      3,"[2,1,1,2]",   "[9,5,0,4]");  // Am-F-C-Em
+            ins("Tech House",          "EDM","Groovy",         2,"[2,1,1,2]",   "[9,7,5,4]");  // Am-G-F-Em
 
-            // ---- Gospel ----
-            ins("Church Stomp",   "Gospel","Spiritual",  3,"[1,4,1,5]",    "[0,5,0,7]");
-            ins("Hallelujah",     "Gospel","Uplifting",  3,"[1,4,5,1]",    "[0,5,7,0]");
-            ins("Holy Ghost",     "Gospel","Euphoric",   3,"[1,2,5,4]",    "[0,9,7,5]");
-            ins("Testimony",      "Gospel","Emotional",  2,"[11,10,12,11]","[0,7,2,0]");
-            ins("Sunday Service", "Gospel","Warm",       2,"[1,5,4,1]",    "[0,7,5,0]");
-            ins("Revival",        "Gospel","Energetic",  3,"[1,4,5,2]",    "[0,5,7,9]");
-            ins("Amen Break",     "Gospel","Spiritual",  3,"[4,2,5,1]",    "[5,9,7,0]");
-            ins("Walk By Faith",  "Gospel","Uplifting",  2,"[1,2,4,5]",    "[0,9,5,7]");
+            // ---- Gospel (8) ----
+            ins("Sunday Morning",      "Gospel","Uplifting",   2,"[11,12,11,10]","[0,9,5,7]"); // Cmaj7-Am7-Fmaj7-G7
+            ins("Praise Break",        "Gospel","Uplifting",   3,"[11,12,11,10]","[3,0,8,10]");// Ebmaj7-Cm7-Abmaj7-Bb7
+            ins("Worship Anthem",      "Gospel","Uplifting",   3,"[1,2,1,1]",   "[7,4,0,2]");  // G-Em-C-D
+            ins("Old Time Gospel",     "Gospel","Uplifting",   2,"[1,1,1,1]",   "[5,10,0,5]"); // F-Bb-C-F
+            ins("Contemporary Praise", "Gospel","Uplifting",   3,"[1,1,2,1]",   "[2,9,11,7]"); // D-A-Bm-G
+            ins("Choir Swell",         "Gospel","Uplifting",   2,"[11,12,11,20]","[10,7,3,5]");// Bbmaj7-Gm7-Ebmaj7-F9
+            ins("Spirit Move",         "Gospel","Uplifting",   3,"[1,2,1,1]",   "[0,9,5,7]");  // C-Am-F-G
+            ins("Joyful Noise",        "Gospel","Uplifting",   3,"[1,1,1,1]",   "[8,3,10,5]"); // Ab-Eb-Bb-F
 
-            // ---- Cinematic / Orchestral ----
-            ins("Heroic Theme",   "Cinematic","Epic",        3,"[1,6,4,5]",    "[0,5,5,7]");
-            ins("Sad Reprise",    "Cinematic","Sad",          1,"[2,5,1,4]",    "[9,5,0,7]");
-            ins("Tension Build",  "Cinematic","Tense",        3,"[2,3,14,10]",  "[0,3,2,7]");
-            ins("Resolution",     "Cinematic","Uplifting",    2,"[2,4,5,1]",    "[9,5,7,0]");
-            ins("Flashback",      "Cinematic","Nostalgic",    1,"[11,12,10,11]","[0,2,7,0]");
-            ins("Dark Matter",    "Cinematic","Dark",         2,"[2,3,12,14]",  "[0,3,5,2]");
-            ins("Victory",        "Cinematic","Epic",         3,"[1,4,5,4]",    "[0,7,5,7]");
-            ins("Elegy",          "Cinematic","Melancholic",  1,"[12,14,10,2]", "[0,5,7,0]");
+            // ---- Cinematic (8) ----
+            ins("Epic Rise",           "Cinematic","Intense",  3,"[2,1,1,1]",   "[9,5,0,7]");  // Am-F-C-G
+            ins("Dark Tension",        "Cinematic","Dark",     2,"[2,1,1,1]",   "[0,8,10,7]"); // Cm-Ab-Bb-G
+            ins("Hero Theme",          "Cinematic","Uplifting",3,"[1,1,2,1]",   "[0,7,9,5]");  // C-G-Am-F
+            ins("Emotional Score",     "Cinematic","Melancholic",2,"[21,22,21,20]","[0,9,5,7]");// Cmaj9-Am9-Fmaj9-G9
+            ins("Suspense",            "Cinematic","Dark",     2,"[14,29,12,12]","[2,7,0,0]"); // Dm7b5-G7b9-Cm7-Cm7
+            ins("Triumph",             "Cinematic","Uplifting",3,"[1,1,2,1]",   "[3,10,0,8]"); // Eb-Bb-Cm-Ab
+            ins("Melancholy",          "Cinematic","Melancholic",1,"[2,2,1,1]", "[9,4,5,7]");  // Am-Em-F-G
+            ins("Adventure",           "Cinematic","Uplifting",3,"[1,1,2,1]",   "[7,2,4,0]");  // G-D-Em-C
 
-            // ---- Blues ----
-            ins("12-Bar Shuffle", "Blues","Gritty",     2,"[10,10,10,10]","[0,5,0,7]"); // I7-IV7-I7-V7
-            ins("Texas Stomp",    "Blues","Energetic",  3,"[10,5,10,10]", "[0,5,0,7]");
-            ins("Delta Blues",    "Blues","Melancholic",2,"[10,10,13,10]","[0,5,3,7]");
-            ins("Slow Blues",     "Blues","Sad",        1,"[10,10,10,14]","[0,5,0,7]");
-            ins("Jump Blues",     "Blues","Happy",      3,"[10,5,10,5]",  "[0,5,0,7]");
-            ins("Boogie Woogie",  "Blues","Energetic",  3,"[10,10,5,10]", "[0,5,5,7]");
-            ins("Minor Blues",    "Blues","Dark",       2,"[12,12,14,10]","[0,5,2,7]");
-            ins("Chicago",        "Blues","Smooth",     2,"[10,12,10,5]", "[0,9,7,5]");
+            // ---- Blues (8) ----
+            ins("Blues in C",          "Blues","Gritty",       2,"[10,10,10,10]","[0,5,7,0]"); // C7-F7-G7-C7
+            ins("Minor Blues",         "Blues","Dark",         2,"[12,12,10,12]","[0,5,7,0]"); // Cm7-Fm7-G7-Cm7
+            ins("Texas Shuffle",       "Blues","Gritty",       3,"[10,10,10,10]","[9,2,4,9]"); // A7-D7-E7-A7
+            ins("Slow Blues",          "Blues","Melancholic",  1,"[10,10,10,10]","[4,9,11,4]");// E7-A7-B7-E7
+            ins("Jump Blues",          "Blues","Groovy",       3,"[10,10,10,10]","[5,10,0,5]");// F7-Bb7-C7-F7
+            ins("Jazz Blues",          "Blues","Smooth",       2,"[11,20,12,26]","[0,5,2,7]"); // Cmaj7-F9-Dm7-G13
+            ins("Blues Ballad",        "Blues","Melancholic",  1,"[12,12,10,11]","[9,2,7,0]"); // Am7-Dm7-G7-Cmaj7
+            ins("Chicago Blues",       "Blues","Gritty",       3,"[10,10,10,10]","[7,0,2,7]"); // G7-C7-D7-G7
 
             sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
 
@@ -1248,7 +1248,7 @@ void TheoryEngine::seedDatabase()
             if (newCount > 0)
             {
                 sqlite3_exec(db,
-                    "INSERT OR REPLACE INTO prog_seed_meta (key, val) VALUES ('version', 4);",
+                    "INSERT OR REPLACE INTO prog_seed_meta (key, val) VALUES ('version', 5);",
                     nullptr, nullptr, nullptr);
             }
         }

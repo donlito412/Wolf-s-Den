@@ -14,7 +14,7 @@ TopBar::TopBar(WolfsDenAudioProcessor& proc)
     logoLabel.setColour(juce::Label::textColourId, Theme::accentHot());
     addAndMakeVisible(logoLabel);
 
-    versionLabel.setText("v3.1", juce::dontSendNotification);
+    versionLabel.setText("v3.2", juce::dontSendNotification);
     versionLabel.setFont(juce::Font(juce::FontOptions(10.f)));
     versionLabel.setColour(juce::Label::textColourId, Theme::textSecondary());
     versionLabel.setJustificationType(juce::Justification::bottomLeft);

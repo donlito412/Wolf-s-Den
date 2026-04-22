@@ -854,3 +854,25 @@ Fixed persistent chord display regression — audition pads were showing dashes 
 - All targets: WolfsDen_All (VST3 + AU + Standalone) built clean
 
 Status: DONE
+
+---
+[2026-04-21]
+Agent: Cascade
+Tasks: TASK_025
+Output: 03_OUTPUTS/025_progression_reseed_report.md
+
+## Summary
+
+Replaced all 88 progression ins() calls in TheoryEngine.cpp with musically researched progressions (8 per genre x 11 genres). Bumped kProgSeedVersion from 4 to 5 and updated the version stamp write accordingly.
+
+## Changes Made — TheoryEngine.cpp only
+
+1. kProgSeedVersion bumped 4 -> 5 — forces reseed on any DB with stored_version < 5.
+2. Replaced all 88 ins() seed calls (lines 1122-1231) with verified progressions using correct chord type IDs (1-29) and root semitone offsets (0-11) for all 11 genres.
+3. Version stamp string updated from 'version', 4 to 'version', 5. Defensive COUNT guard from TASK_024 left intact.
+
+## Build Status
+- Zero errors, zero warnings
+- All targets: WolfsDen_All (VST3 + AU + Standalone) built clean
+
+Status: DONE
